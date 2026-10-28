@@ -44,7 +44,7 @@ textarea{min-height:60px;resize:vertical}
 .status.err{background:var(--badbg);color:var(--bad)}
 .status.warn{background:var(--warnbg);color:var(--warn)}
 .carpick{position:relative}
-.carlist{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:8;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.18);max-height:300px;overflow:auto}
+.carlist{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:8;background:var(--card);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.18);max-height:min(60vh,420px);overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
 .carlist button{display:flex;width:100%;align-items:center;gap:10px;text-align:left;font:inherit;background:none;border:none;border-top:1px solid var(--line);padding:10px 12px;color:var(--ink);cursor:pointer}
 .carlist button:first-child{border-top:none}
 .carlist button:active,.carlist button:hover{background:var(--tint)}
@@ -445,7 +445,7 @@ function carMatches(q){
     .sort(function(a,b){var ap=a.plate.toLowerCase().indexOf(flat)===0?0:1,bp=b.plate.toLowerCase().indexOf(flat)===0?0:1;return ap-bp||a.name.localeCompare(b.name);});
 }
 function carLabel(c){return c.name+(c.color?' · '+c.color:'')+' · '+c.plate;}
-function carList(o,q){var el=document.getElementById(o.id),box=el.querySelector('[data-carlist]'),m=carMatches(q).slice(0,12);
+function carList(o,q){var el=document.getElementById(o.id),box=el.querySelector('[data-carlist]'),m=carMatches(q);   /* every match; the list scrolls */
   box.innerHTML=m.length?m.map(function(c){var sw=SWATCH[String(c.color).toLowerCase()]||'transparent';
     return '<button type="button" data-pick="'+esc(c.plate)+'"><span class="sw" style="background:'+sw+'"></span><span class="nm">'+esc(c.name)+(c.color?' <span class="pl">· '+esc(c.color)+'</span>':'')+'</span><span class="pl">'+esc(c.plate)+'</span></button>';}).join('')
     :'<div class="none">No car in the fleet matches “'+esc(q)+'”</div>';
