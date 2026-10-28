@@ -226,10 +226,45 @@ if(SESSION)enter().catch(function(){showGate('login');});else showGate(load('er_
 
 /* ---------- images ---------- */
 function fileToImg(file){return new Promise(function(res,rej){var u=URL.createObjectURL(file),i=new Image();i.onload=function(){res(i);};i.onerror=function(){rej(new Error('Could not open that photo'));};i.src=u;});}
-function scaled(img,max){var s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));var c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
+function scaled(img,max){var W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,s=Math.min(1,max/Math.max(W,H));var c=document.createElement('canvas');c.width=Math.round(W*s);c.height=Math.round(H*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
 /* grey + contrast stretch helps OCR on phone photos of paper */
+/* Find the receipt in the photo: the largest solid patch of white, low-colour pixels. When it's a small part of
+   the picture (receipt held up in the car), crop to it and enlarge it so the text is big enough to read.
+   Returns null when the paper already fills most of the photo or nothing paper-like is found. */
+function wordCount(t){return (String(t).match(/\b[A-Za-z]{3,}\b/g)||[]).length;}
+function cropPaper(img){
+  var W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,k=Math.min(1,300/Math.max(W,H));
+  var w=Math.max(1,Math.round(W*k)),h=Math.max(1,Math.round(H*k)),c=document.createElement('canvas');c.width=w;c.height=h;
+  var x=c.getContext('2d');x.drawImage(img,0,0,w,h);var p=x.getImageData(0,0,w,h).data,N=w*h,i;
+  /* paper is near-white and colourless. Set the brightness bar from the brightest colourless pixels in this photo,
+     so pavement, walls and seats (grey but darker) are left out, and dim indoor shots still work */
+  var lum=new Float32Array(N),neutral=new Uint8Array(N),nl=[];
+  for(i=0;i<N;i++){var r=p[i*4],g=p[i*4+1],b=p[i*4+2];lum[i]=(r+g+b)/3;if(Math.max(r,g,b)-Math.min(r,g,b)<30){neutral[i]=1;nl.push(lum[i]);}}
+  if(nl.length<N*.02)return null;
+  nl.sort(function(a,b){return a-b;});
+  var thr=Math.max(150,nl[Math.floor(nl.length*.92)]-22);
+  var mask=new Uint8Array(N);for(i=0;i<N;i++)mask[i]=(neutral[i]&&lum[i]>=thr)?1:0;
+  /* connected white areas (the paper around the printed text stays one piece) */
+  var seen=new Uint8Array(N),best=null,stack=[];
+  for(i=0;i<N;i++){if(!mask[i]||seen[i])continue;var n=0,x0=w,y0=h,x1=0,y1=0;stack.push(i);seen[i]=1;
+    while(stack.length){var q=stack.pop(),qx=q%w,qy=(q/w)|0;n++;if(qx<x0)x0=qx;if(qx>x1)x1=qx;if(qy<y0)y0=qy;if(qy>y1)y1=qy;
+      if(qx>0&&!seen[q-1]&&mask[q-1]){seen[q-1]=1;stack.push(q-1);}
+      if(qx<w-1&&!seen[q+1]&&mask[q+1]){seen[q+1]=1;stack.push(q+1);}
+      if(qy>0&&!seen[q-w]&&mask[q-w]){seen[q-w]=1;stack.push(q-w);}
+      if(qy<h-1&&!seen[q+w]&&mask[q+w]){seen[q+w]=1;stack.push(q+w);}}
+    var bw=x1-x0+1,bh=y1-y0+1,solid=n/(bw*bh),score=n*solid;
+    if(bw>=10&&bh>=10&&(!best||score>best.score))best={n:n,x0:x0,y0:y0,x1:x1,y1:y1,bw:bw,bh:bh,solid:solid,score:score};}
+  if(!best)return null;
+  var share=(best.bw*best.bh)/N;
+  if(share>0.4||share<0.02||best.solid<0.45)return null;   /* paper already fills the photo, or nothing paper-like */
+  var mx=Math.round(best.bw*.05)+2,my=Math.round(best.bh*.04)+2;
+  var sx=Math.max(0,(best.x0-mx)/k),sy=Math.max(0,(best.y0-my)/k),sw=Math.min(W-sx,(best.bw+2*mx)/k),sh=Math.min(H-sy,(best.bh+2*my)/k);
+  var up=Math.min(3,Math.max(1,1600/sw)),out=document.createElement('canvas');out.width=Math.round(sw*up);out.height=Math.round(sh*up);
+  var o=out.getContext('2d');o.imageSmoothingQuality='high';o.drawImage(img,sx,sy,sw,sh,0,0,out.width,out.height);
+  return out;
+}
 function forOcr(img){
-  var c=scaled(img,2200),x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Array(256).fill(0),n=p.length/4;
+  var c=scaled(img,(img.width&&!img.naturalWidth)?3200:2200),x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Array(256).fill(0),n=p.length/4;
   for(var i=0;i<p.length;i+=4){var g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=p[i+1]=p[i+2]=g;h[g]++;}
   var lo=0,hi=255,acc=0;for(lo=0;lo<255;lo++){acc+=h[lo];if(acc>n*.01)break;}acc=0;for(hi=255;hi>0;hi--){acc+=h[hi];if(acc>n*.01)break;}
   lo=Math.min(lo,100);hi=Math.max(hi,170);   /* only stretch genuinely flat photos; a mostly-white page stays as it is */
@@ -339,10 +374,12 @@ function findVendor(lines){
   lines.slice(0,25).forEach(function(raw,i){var l=raw.replace(/\s{2,}/g,' ').trim();
     if(l.length<4||l.length>60||NOT_VENDOR.test(l))return;
     var letters=(l.match(/[a-z]/gi)||[]).length;if(letters<l.length*.55||letters<4)return;
+    var words=l.split(/\s+/),real=words.filter(function(w){return /^[A-Za-z&'.,-]{3,}$/.test(w);});
+    if(!(real.length>=2||(real.length===1&&real[0].replace(/[^a-z]/gi,'').length>=5))||real.length<words.length*.5)return;   /* scanning junk like "Ee ema a" */
     var words=l.split(' ').length,score=-i*.3+(BIZ.test(l)?6:0)+(words>=2&&words<=6?2:-2)+(/^[A-Z0-9 &'.,-]+$/.test(l)?1:0);
     var nx=(lines[i+1]||'').replace(/[^a-z.]/gi,'');if(/^(corp|corporation|inc|llc|co|ltd|lp)\.?$/i.test(nx))l=l+' '+nx.replace(/\.$/,'').toUpperCase().replace(/^(CORPORATION|LTD)$/,function(x){return x;});
     if(!best||score>best.s)best={l:l,s:score};});
-  return best?best.l.slice(0,80):'';
+  return best?best.l.replace(/^[^A-Za-z0-9]+/,'').replace(/[^A-Za-z0-9.)]+$/,'').slice(0,80):'';
 }
 var INV_LABELS=[
   /\b(?:invoice|inv)\s*(?:no\.?|number|num|#)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i,
@@ -480,7 +517,8 @@ function addPages(o,files){
   var list=[].slice.call(files);
   list.reduce(function(p,f){return p.then(function(){return fileToImg(f).then(function(img){
       o.imgs.push(img);var t=document.createElement('img');t.src=img.src;t.alt='Page '+o.imgs.length;el.querySelector('.thumbs').appendChild(t);
-      return ocr(forOcr(img),function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';}).then(function(text){o.text+=(o.text?'\n':'')+text;});});});},Promise.resolve())
+      var bar=function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';},crop=cropPaper(img),whole=function(){return ocr(forOcr(img),bar);};
+      return (crop?ocr(forOcr(crop),bar).then(function(t){return wordCount(t)>=8?t:whole();}):whole()).then(function(text){o.text+=(o.text?'\n':'')+text;});});});},Promise.resolve())
   .then(function(){fill(o);})
   .catch(function(e){setStatus(o,e.message||'Could not read the photo','err');fill(o);});
 }
