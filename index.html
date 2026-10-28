@@ -262,6 +262,16 @@ function findPapers(img){
   comps.sort(function(a,b){return b.score-a.score;});
   if(!comps.length)return [];
   var big=comps.filter(function(cp){return cp.n>=comps[0].n*0.35&&cp.share<=0.85;});
+  big.sort(function(a,b){return a.x0-b.x0;});
+  for(var j=1;j<big.length;j++){var a=big[j-1],b=big[j];
+    /* the strip between the pieces is evenly shaded paper (a shadow across one receipt), not a darker, patchy gap between two receipts */
+    var gy0=Math.max(a.y0,b.y0),gy1=Math.min(a.y1,b.y1),gx0=a.x1+1,gx1=b.x0-1,gl=[],gnn=0;
+    if(gx1>=gx0&&gy1>gy0)for(var yy=gy0;yy<=gy1;yy+=2)for(var xx=gx0;xx<=gx1;xx++){var gi=yy*w+xx;gl.push(lum[gi]);if(neutral[gi])gnn++;}
+    gl.sort(function(u,v){return u-v;});
+    var shade=!gl.length||(gnn/gl.length>=.9&&gl[Math.floor(gl.length*.1)]>=thr*.45&&gl[Math.floor(gl.length*.9)]-gl[Math.floor(gl.length*.1)]<=thr*.2);
+    if(shade&&b.x0-a.x1<=w*.4&&Math.abs(a.y0-b.y0)<=h*.06&&Math.abs(a.y1-b.y1)<=h*.06){
+      var m={n:a.n+b.n,x0:a.x0,y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)};m.bw=m.x1-m.x0+1;m.bh=m.y1-m.y0+1;m.share=m.bw*m.bh/N;m.solid=m.n/(m.bw*m.bh);m.score=m.n*m.solid;
+      big.splice(j-1,2,m);j--;}}
   return big.map(function(cp){
     var mx=Math.round(cp.bw*.04)+2,my=Math.round(cp.bh*.03)+2;
     var sx=Math.max(0,(cp.x0-mx)/k),sy=Math.max(0,(cp.y0-my)/k),sw=Math.min(W-sx,(cp.bw+2*mx)/k),sh=Math.min(H-sy,(cp.bh+2*my)/k);
@@ -330,6 +340,11 @@ function iso(y,m,d){if(y<100)y+=2000;if(m<1||m>12||d<1||d>31)return null;var dt=
   return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
 /* scanning often reads 0 as O, 1 as l/I, 5 as S inside numbers */
 function fixDigits(l){return l.replace(/(\d)[oO](?=[\d\/\-.])/g,'$10').replace(/(?<=[\d\/\-.])[oO](?=\d)/g,'0').replace(/(?<=[\d\/\-.])[lI|](?=\d)/g,'1').replace(/(\d)[lI|](?=[\/\-.])/g,'$11').replace(/\s*([\/\-])\s*/g,'$1');}
+var CONF='0689';
+function digitVariants(str,maxCh){var out=[{s:'',c:0}];
+  for(var i=0;i<str.length;i++){var ch=str[i],nx=[];out.forEach(function(v){nx.push({s:v.s+ch,c:v.c});
+      if(CONF.indexOf(ch)>=0&&v.c<maxCh)CONF.split('').forEach(function(o){if(o!==ch)nx.push({s:v.s+o,c:v.c+1,w:(v.w||0)+(ch==='0'||o==='0'?1:1.4)});});});out=nx;}
+  return out;}
 function findDate(lines){
   var best=null;
   lines.forEach(function(l0,i){
@@ -337,7 +352,9 @@ function findDate(lines){
     var re1=/(?:^|[^\d])(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?!\d)/g,re2=/(?:^|[^\d])(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?!\d)/g,
         re3=/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?,?\s*'?(\d{2,4})\b/gi,
         re4=/\b(\d{1,2})[\s\-]?(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*[\s\-,]*'?(\d{2,4})\b/gi;
-    while((m=re1.exec(l)))cands.push(iso(+m[3],+m[1],+m[2]));
+    while((m=re1.exec(l))){var d0=iso(+m[3],+m[1],+m[2]);
+      if(!d0&&m[3].length===4){var bestv=null;digitVariants(m[1]+'|'+m[2]+'|'+m[3],3).forEach(function(v){var q=v.s.split('|'),d=iso(+q[2],+q[0],+q[1]);if(d&&(!bestv||v.c<bestv.c))bestv={d:d,c:v.c};});if(bestv)d0=bestv.d;}
+      cands.push(d0);}
     while((m=re2.exec(l)))cands.push(iso(+m[1],+m[2],+m[3]));
     while((m=re3.exec(l)))cands.push(iso(+m[3],MONTHS[m[1].toLowerCase()],+m[2]));
     while((m=re4.exec(l)))cands.push(iso(+m[3],MONTHS[m[2].toLowerCase()],+m[1]));
@@ -346,16 +363,17 @@ function findDate(lines){
   return best&&best.d;
 }
 var KNOWN_VENDORS=[
-  ["Buc-ee's",/buc.?ee/i],['Shell',/\bshell\b/i],['Exxon',/\bexxon/i],['Mobil',/\bmobil\b/i],['Chevron',/\bchevron/i],['Texaco',/\btexaco/i],
+  ["Buc-ee's",/buc.?ee/i],['Shell',/\bshell\b/i],['Exxon',/\bexxon|xxon\s*express|express\s*pay\b/i],['Mobil',/\bmobil\b/i],['Chevron',/\bchevron/i],['Texaco',/\btexaco/i],
   ['Valero',/\bvalero/i],['QuikTrip',/quik\s*trip|\bQT\s*#?\d/i],['Murphy USA',/murphy\s*(usa|express)/i],['Circle K',/circle\s*k\b/i],
   ['7-Eleven',/7.?eleven|\b7-11\b/i],['Speedway',/speedway/i],['Sunoco',/sunoco/i],['Phillips 66',/phillips\s*66/i],['Conoco',/conoco/i],
-  ['BP',/\bbp\b|amoco/i],['Marathon',/\bmarathon\b/i],['Citgo',/citgo/i],['Gulf',/\bgulf\b/i],['RaceTrac',/race\s*trac/i],['Stripes',/\bstripes\b/i],
+  ['BP',/^\W*bp\b|\bbp\s*(?:#|\d|gas|station|express|connect)|amoco/im],['Marathon',/\bmarathon\b/i],['Citgo',/citgo/i],['Gulf',/\bgulf\b/i],['RaceTrac',/race\s*trac/i],['Stripes',/\bstripes\b/i],
   ["Love's",/\blove'?s\b/i],['Pilot',/\bpilot\b/i],['Flying J',/flying\s*j/i],['Timewise',/time\s*wise/i],['EZ Mart',/ez\s*mart/i],['Kwik',/\bkwik/i],
   ['Costco',/costco/i],["Sam's Club",/sam'?s\s*club/i],['Walmart',/wal.?mart/i],['H-E-B',/\bh.?e.?b\b/i],['Kroger',/kroger/i],
   ['AutoZone',/auto\s*zone/i],["O'Reilly Auto Parts",/o.?reilly/i],['Advance Auto Parts',/advance\s*auto/i],['NAPA',/\bnapa\b/i],
   ['Firestone',/firestone/i],['Goodyear',/goodyear/i],['Discount Tire',/discount\s*tire/i],['Jiffy Lube',/jiffy\s*lube/i],['Valvoline',/valvoline/i],
   ['Take 5',/take\s*5/i],['Midas',/\bmidas\b/i],['Pep Boys',/pep\s*boys/i],['Meineke',/meineke/i],['Christian Brothers',/christian\s*brothers/i],
   ['Mister Car Wash',/mister\s*car\s*wash|mistercarwash/i],["Tommy's Express Car Wash",/tommy'?s\s*express/i],['Quick Quack Car Wash',/quick\s*quack/i],['Zips Car Wash',/zips\s*car\s*wash/i],['Super Star Car Wash',/super\s*star\s*car\s*wash/i],['Take 5 Car Wash',/take\s*5\s*car\s*wash/i],
+  ['Best Auto Professional USA',/best\s*a\w{0,3}\s*profes|professional\s*usa|\bnal\s*usa\b/i],['Mobilco Locksmith & Security',/mobilco/i],
   ['Express Oil',/express\s*oil/i],['Strickland Brothers',/strickland/i],['Mavis',/\bmavis\b/i],['Caliber Collision',/caliber/i],['Safelite',/safelite/i]
 ];
 var FUEL_BRANDS=/buc.?ee|\bshell\b|exxon|\bmobil\b|chevron|texaco|valero|quik\s*trip|murphy|circle\s*k|7.?eleven|speedway|sunoco|phillips\s*66|conoco|\bbp\b|marathon|citgo|\bgulf\b|race\s*trac|\bstripes\b|love'?s|flying\s*j|\bpilot\b/i;
@@ -363,7 +381,7 @@ var NOT_MONEY=/deductible|limit|coverage|policy|odometer|mileage|phone|fax|tel\b
 function lastAmount(lines,re,not){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var a=amountsIn(l);if(a.length)return a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)return nx[nx.length-1];
     var pv=alone&&lines[i-1]&&lines[i-1].replace(/[^a-z]/gi,'').length<=3&&amountsIn(lines[i-1]);if(pv&&pv.length)return pv[pv.length-1];}}return null;}
 /* the figure you actually paid, best label first */
-var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid|base\s*am(?:oun)?t|sale\s*amount|purchase\s*amount|total\s*charged|amount\s*charged/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
+var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid|base\s*a[mn](?:oun)?t|sale\s*amount|purchase\s*amount|total\s*charged|amount\s*charged/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
 var NOT_TOTAL=/sub\s*-?\s*total|total\s*(parts|labor|labour|tax|discount|savings|units|hours|items?|price|cost\s*each|qty|quantity)|(parts|labor|labour|tax|paint|materials?|sublet|items?)\s*total|total\s*(qty|quantity)/i;
 function findTotal(lines){
   var first=null;for(var k=0;k<TOTAL_LABELS.length;k++){var v=lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL);if(v!=null&&v>=0){first=v;break;}}
@@ -407,16 +425,18 @@ function guessCategory(t){
   return best;
 }
 var BIZ=/\b(auto|automotive|body|paint|collision|tire|tires|lube|oil|service|services|repair|motors?|garage|shop|parts|wash|detail|glass|towing|tow|llc|inc|co\.?|corp|company|store|center|centre|express|depot|zone|dealership|nissan|toyota|ford|chevrolet|hyundai|kia|bmw|mercedes|honda)\b/i;
-var NOT_VENDOR=/sadaat|easy\s*rentalz|nazeer|askary|deliver\s*to|welcome|thank|visit us|store\s*#|\b\d{2,6}\s+\w+(?:\s\w+)?\s+(st|rd|ave|blvd|dr|hwy|fwy|pkwy|ln|way|ct|cir|pl)\b|invoice|receipt|estimate|original|repair\s*order|work\s*order|date|phone|tel|fax|www\.|@|page\s*\d|bill\s*to|ship\s*to|sold\s*to|customer|owner|insured|appraiser|adjuster|claim|policy|vin\b|license|plate|odometer|mileage|^total|thank/i;
+var NOT_VENDOR=/[XHK*#]{5,}|sadaat|easy\s*rentalz|nazeer|askary|deliver\s*to|welcome|thank|visit us|store\s*#|\b\d{2,6}\s+\w+(?:\s\w+)?\s+(st|rd|ave|blvd|dr|hwy|fwy|pkwy|ln|way|ct|cir|pl)\b|invoice|receipt|estimate|original|repair\s*order|work\s*order|date|phone|tel|fax|www\.|@|page\s*\d|bill\s*to|ship\s*to|sold\s*to|customer|owner|insured|appraiser|adjuster|claim|policy|vin\b|license|plate|odometer|mileage|^total|thank/i;
 function findVendor(lines){
   var top=lines.slice(0,20).join('\n');
   var kv=KNOWN_VENDORS.slice().sort(function(a,b){return b[0].length-a[0].length;});
   var whole=lines.join('\n');if(/car\s*wash/i.test(whole))for(var kw=0;kw<kv.length;kw++)if(/Car Wash$/.test(kv[kw][0])&&kv[kw][1].test(whole))return kv[kw][0];
   for(var k=0;k<kv.length;k++)if(kv[k][1].test(top))return kv[k][0];
+  for(var fi=0;fi<Math.min(4,lines.length);fi++){var fm=lines[fi].match(/\b(fuel|gas|food\s*mart|mart)\s*#\s*\d+/i);if(fm)return fm[0].replace(/\s*#\s*/,' #').replace(/\b[a-z]/g,function(c){return c.toUpperCase();}).replace(/\B[A-Z]+/g,function(x){return x.toLowerCase();});}
   var best=null;
   lines.slice(0,25).forEach(function(raw,i){var l=raw.replace(/\s{2,}/g,' ').trim();
     if(lines.slice(Math.max(0,i-3),i).some(function(pv){return /deliver\s*to|sold\s*to|bill\s*to|ship\s*to/i.test(pv);}))return;   /* the customer block is us, not the seller */
     if(l.length<4||l.length>60||NOT_VENDOR.test(l))return;
+    var lt=l.replace(/[^A-Za-z]/g,'');if(lt.length>=4&&(lt.match(/[HKXN]/g)||[]).length>=lt.length*.6)return;
     var letters=(l.match(/[a-z]/gi)||[]).length;if(letters<l.length*.55||letters<4)return;
     var words=l.split(/\s+/),real=words.filter(function(w){return /^[A-Za-z&'.,-]{3,}$/.test(w);});
     if(!(real.length>=2||(real.length===1&&real[0].replace(/[^a-z]/gi,'').length>=5))||real.length<words.length*.5)return;   /* scanning junk like "Ee ema a" */
@@ -480,31 +500,54 @@ function cleanItem(d){
 function summarize(lines,items,category,vendor){
   var flat=lines.join('\n'),bits=[],vend=String(vendor||'').toLowerCase();
   if(category==='Fuel'){
-    var gal=(flat.match(/\b(?:regular|unleaded|premium|plus|super|diesel|unl|reg|mid\w*)\s+(\d{1,3}\.\d{3})[G6]?\b/i)||flat.match(/(\d{1,3}\.\d{2,3})\s*(?:gal|gallons?|G)\b/i)||flat.match(/gallons?\s*[:#]?\s*(\d{1,3}\.\d{2,3})/i)||[])[1];
+    var gal=((flat.match(/\b(?:regular|unleaded|premium|plus|super|diesel|unl|reg|mid\w*)\s+(\d{1,3}\.\s?\d{3})[G6]?\b/i)||[])[1]||'').replace(/\s/g,'')||(flat.match(/(\d{1,3}\.\d{2,3})\s*(?:gal|gallons?|G)\b/i)||flat.match(/gallons?\s*[:#]?\s*(\d{1,3}\.\d{2,3})/i)||[])[1];
     var ppg=(flat.match(/(?:price\s*\/?\s*gal|ppg|@)\s*\$?\s*(\d\.\d{2,3})/i)||[])[1];
     var grade=(flat.match(/\b(unleaded plus|unleaded|super|premium|plus|mid.?grade|regular|diesel|unl|reg)\b/i)||[])[1];
     if(gal)return gal+' gal'+(grade?' '+grade.replace(/^unl$/i,'Unleaded').replace(/^reg$/i,'Regular').replace(/\b[a-z]/,function(c){return c.toUpperCase();}):'')+(ppg?' @ $'+ppg+'/gal':'');
   }
   /* priced lines first */
   var tot=findTotal(lines),its=items.filter(function(it){return !(items.length>1&&tot!=null&&Math.abs(it.amount-tot)<0.005);});
-  its.forEach(function(it){if(NOT_SUMMARY.test(it.desc))return;var c=cleanItem(it.desc)+(it.part&&cleanItem(it.desc).indexOf('(part')<0?' (part '+it.part+')':'');if(/[A-Za-z]{3,}/.test(c))bits.push(c+' $'+it.amount.toFixed(2));});
+  its.forEach(function(it){if(NOT_SUMMARY.test(it.desc))return;var nx=String(it.next||'').trim().replace(/(\s+\S{1,2})+$/,'');
+    if(nx&&nx.length>=3&&nx.length<=30&&!amountsIn(nx).length&&!/\d{3,}|total|tax|visa|master|debit|credit|card|cash|change|sku/i.test(nx)&&!NOT_SUMMARY.test(nx)&&(nx.match(/[a-z]/gi)||[]).length>=nx.length*.7)it={desc:it.desc.replace(/\s+x\s*$/i,' x1')+', '+nx,amount:it.amount,part:it.part};
+    var c=cleanItem(it.desc)+(it.part&&cleanItem(it.desc).indexOf('(part')<0?' (part '+it.part+')':'');if(/[A-Za-z]{3,}/.test(c))bits.push(c+' $'+it.amount.toFixed(2));});
   /* then service titles printed without a price (e.g. "ExpressAlign Total Alignment") */
   if(!bits.length)lines.forEach(function(l){var t=l.replace(/[|\\\[\]{}_]+/g,' ').replace(/\s{2,}/g,' ').trim().replace(/^.*?\b\d{5}(?:-\d{4})?\b[\s,]*/,'');   /* address and service printed on one line: keep what follows the ZIP */
     if(t.length<6||t.length>60||!SERVICE_WORDS.test(t)||NOT_SUMMARY.test(t)||amountsIn(t).length||(vend&&t.toLowerCase().indexOf(vend.slice(0,12))>=0))return;
     if((t.match(/[a-z]/gi)||[]).length<t.length*.6)return;if(bits.indexOf(t)<0)bits.push(t);});
+  if(!bits.length&&/total\s*alignment|wheel\s*alignment|\balignment\b/i.test(flat))bits.push(/total\s*alignment/i.test(flat)?'Total alignment':'Wheel alignment');
   var more=bits.length>4?' +'+(bits.length-4)+' more':'';
   return bits.slice(0,4).join('; ')+more;
 }
 /* a car-wash membership signup (one membership per car): the page then asks for a photo of the windshield sticker */
 function findWashMembership(text,r){
   var washy=r.category==='Cleaning / Detail'||/car\s*wash/i.test(r.vendor||'');
-  if(!washy||!/unlimited\s*wash|wash\s*club|\bUWC\b|membership|member\s*sign|unlimited\s*plan|monthly\s*plan|wash\s*pass/i.test(text))return null;
-  var mem=(text.match(/barcode\s*(?:number)?\s*(?:is)?\s*:?\s*(\d{8,16})/i)||text.match(/member(?:ship)?\s*(?:#|no\.?|number|id)\s*:?\s*([A-Z0-9\-]{5,20})/i)||[])[1]||'';
+  if(!washy||!/unlimited\s*wash|wash\s*club|\bUWC\b|membership|member\s*sign|sign\s*-?\s*up|unlimited\s*plan|monthly\s*plan|wash\s*pass/i.test(text))return null;
+  var pl=text.match(/plate\s*[:.]?\s*(\d{4,16})([^\n]*)\n?([^\n]*)/i),mem0='';
+  if(pl){mem0=pl[1];if(mem0.length<12){var more=((pl[2]+' '+pl[3]).match(/(\d{3,12})\s*$/m)||(pl[3].match(/(\d{3,12})/))||[])[1]||'';if((mem0+more).length===12)mem0+=more;}}
+  var mem=mem0||(text.match(/barcode\s*(?:number)?\s*(?:is)?\s*:?\s*(\d{8,16})/i)||text.match(/member(?:ship)?\s*(?:#|no\.?|number|id)\s*:?\s*([A-Z0-9\-]{5,20})/i)||[])[1]||'';
   var bd=(text.match(/on\s*the\s*(\d{1,2})(?:st|nd|rd|th)?\b[\s\S]{0,25}?(?:of\s*each|every)\s*month/i)||[])[1]||'';
   return {member_no:mem,billing_day:bd,plan:((r.items[0]&&r.items[0].desc)||'').replace(/[\s:]+$/,'')};
 }
+function fixFuel(lines){
+  var flat=lines.join('\n');
+  var gm=flat.match(/\b(?:regular|unleaded|premium|plus|super|diesel|unl|reg|mid\w*)\s+(\d{1,3}\.\s?\d{3})[G6]?\b/i),pm=flat.match(/price\s*\/?\s*gal\D{0,6}(\d\.\d{3})/i);
+  if(!gm||!pm)return;
+  var tv={};lines.forEach(function(l){if(/total/i.test(l)&&!/sub/i.test(l)){var a=l.match(/(\d{1,4}\.\d{2})(?!\d)/g);if(a){var t=a[a.length-1];tv[t]=(tv[t]||0)+1;}}});
+  var ts=Object.keys(tv).sort(function(a,b){return tv[b]-tv[a];})[0];if(!ts)return;
+  var graw=gm[1],g=graw.replace(/\s/g,''),pr=pm[1];if(Math.abs(Math.round(+g*+pr*100)/100-(+ts))<=0.011)return;
+  var best=null,tie=false,tieT=false;
+  digitVariants(g,3).forEach(function(gv){if(+gv.s<0.5||+gv.s>40)return;digitVariants(pr,2).forEach(function(pv){if(+pv.s<1.5||+pv.s>7)return;
+    var r=(Math.round(+gv.s*+pv.s*100)/100).toFixed(2);if(r.length!==ts.length)return;var c=0;
+    for(var i=0;i<r.length;i++)if(r[i]!==ts[i]){if(CONF.indexOf(r[i])<0||CONF.indexOf(ts[i])<0){c=99;break;}c++;}
+    if(c>3)return;var cost=(gv.w||0)+(pv.w||0)+c;
+    if(!best||cost<best.cost-1e-9){best={g:gv.s,p:pv.s,t:r,cost:cost};tie=false;tieT=false;}else if(Math.abs(cost-best.cost)<1e-9){if(best.g!==gv.s||best.p!==pv.s)tie=true;if(best.t!==r)tieT=true;}});});
+  if(!best||tieT)return;
+  if(tie){best.g=g;best.p=pr;}   /* every best reading agrees on the total: fix the total, keep gallons and price as read */
+  var esc=function(x){return x.replace('.','\\.');};
+  for(var i=0;i<lines.length;i++)lines[i]=lines[i].replace(new RegExp('(^|[^\\d])'+graw.replace('.','\\.')+'[G6]?(?!\\d)'),'$1'+best.g+'G').replace(new RegExp('(^|[^\\d])'+esc(pr)+'(?!\\d)'),'$1'+best.p).replace(new RegExp('(^|[^\\d])'+esc(ts)+'(?!\\d)','g'),'$1'+best.t);
+}
 function parse(text){
-  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean),flat=lines.join('\n');
+  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean);fixFuel(lines);var flat=lines.join('\n');text=flat;
   var total=findTotal(lines);if(total==null)total=summaryTotal(lines);
   var subtotal=lastAmount(lines,/sub\s*-?\s*total/i);
   var tax=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax/i);
@@ -513,14 +556,14 @@ function parse(text){
   if(total==null&&all.length&&lines.length<=40)total=Math.max.apply(null,all);
   var inv=findInvoiceNo(lines);
   var odo=findOdometer(lines);
-  var items=[];lines.forEach(function(l){
-    if(/invoic|\.py\b|savings|you saved|discount|total|tax|balance|amount due|change due|your change|^\W*change\b|\bchange\s*:|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal|base\s*am(oun)?t|sale\s*amount|purchase\s*amount/i.test(l)||NOT_MONEY.test(l)||SUMMARY_LINE.test(l)||/°|º|\bdeg\b|camber|caster|\btoe\b|thrust/i.test(l))return;
+  var items=[];lines.forEach(function(l,li){
+    if(/invoic|\.py\b|savings|you saved|discount|total|tax|balance|amount due|change due|your change|^\W*change\b|\bchange\s*:|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal|base\s*a[mn](oun)?t|\bresp\b|approval|ref\s*#|sale\s*amount|purchase\s*amount/i.test(l)||NOT_MONEY.test(l)||SUMMARY_LINE.test(l)||/°|º|\bdeg\b|camber|caster|\btoe\b|thrust/i.test(l))return;
     var a=amountsIn(l);if(!a.length)return;var cut=l.search(/(?:\$\s?)?-?\d{1,3}(?:,\d{3})*[.,]\d{2}(?!\d)/);var desc=(cut>0?l.slice(0,cut):l).replace(/(?:\$\s?)?-?\d{1,3}(?:[,\s]\d{3})*[.,]\d{2}/g,'').replace(/\bSKU[-\s]?\S*/gi,' ').replace(/[|\[\]{}\\_]+/g,' ').replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').trim();
     var part=((cut>0?l.slice(0,cut):l).match(/\b[A-Z0-9]{2,6}[*\-][A-Z0-9]{2,8}[*\-][A-Z0-9]{1,6}\b/)||[])[0]||'';
     desc=desc.split(/\s+/);var pj=-1;for(var q=0;q<Math.min(5,desc.length);q++)if(/^\d{1,3}$/.test(desc[q])||/^(?=.*\d)[A-Z0-9*\-]{5,}$/.test(desc[q]))pj=q;
     if(pj>=0&&desc.slice(pj+1).filter(function(w){return /^[A-Za-z]{3,}$/.test(w);}).length>=2)desc=desc.slice(pj+1);
     while(desc.length&&!/^[A-Za-z][A-Za-z'&-]{2,}$/.test(desc[0]))desc.shift();while(desc.length&&/^[^A-Za-z]*\d[^A-Za-z]*$|^[|\]\[]+$/.test(desc[desc.length-1]))desc.pop();desc=desc.join(' ');
-    if(!/[A-Za-z]{3,}/.test(desc))return;items.push({desc:desc.slice(0,90),amount:a[a.length-1],part:part.replace(/\*/g,'-')});});
+    if(!/[A-Za-z]{3,}/.test(desc))return;items.push({desc:desc.slice(0,90),amount:a[a.length-1],part:part.replace(/\*/g,'-'),next:lines[li+1]||''});});
   /* car: a VIN or plate printed on the invoice */
   var up=flat.toUpperCase(),car=null,how='';
   CARS.forEach(function(c){if(car)return;if(c.vin&&c.vin.length===17&&(up.indexOf(c.vin)>=0||up.replace(/O/g,'0').indexOf(c.vin.replace(/O/g,'0'))>=0)){car=c;how='VIN';}});
@@ -529,6 +572,13 @@ function parse(text){
   /* a VIN with one or two characters misread */
   if(!car){var toks=up.replace(/[^A-Z0-9\n ]/g,' ').match(/[A-Z0-9]{16,18}/g)||[];
     toks.some(function(t){return CARS.some(function(c){if(!c.vin||c.vin.length!==17)return false;for(var off=0;off<=t.length-17;off++){var d=0,u=t.substr(off,17);for(var q=0;q<17&&d<3;q++)if(u[q]!==c.vin[q])d++;if(d<=2){car=c;how='VIN';return true;}}return false;});});}
+  if(!car){var nv=function(x){return String(x).toUpperCase().replace(/[OQD]/g,'0').replace(/[IL|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');};
+    var nt=lines.map(function(l){return nv(l.replace(/\s+/g,''));}).join('\n');
+    var pv=CARS.filter(function(c){return c.vin&&c.vin.length===17&&nt.indexOf(nv(c.vin.slice(0,11)))>=0;});
+    if(pv.length===1){car=pv[0];how='VIN';}
+    if(!car){var fz=[];CARS.forEach(function(c){if(!c.vin||c.vin.length!==17)return;var v=nv(c.vin);
+        nt.split('\n').some(function(t){for(var off=0;off<=t.length-17;off++){var d=0;for(var q=0;q<17&&d<3;q++)if(t[off+q]!==v[q])d++;if(d<=2){fz.push(c);return true;}}return false;});});
+      if(fz.length===1){car=fz[0];how='VIN';}}}
   /* the model printed on the invoice ("Hyundai : Sonata Hybrid : 2015"), when only one fleet car fits */
   if(!car){var fits=CARS.filter(function(c){var nm=String(c.name).replace(/^\d{4}\s+/,''),parts=nm.split(' '),model=parts[1]||'';
       if(model.length<4)return false;
@@ -542,6 +592,7 @@ function parse(text){
     Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
   var res={makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:summarize(lines,items,guessCategory(flat),findVendor(lines))};
   if(/^(AutoZone|O'Reilly Auto Parts|Advance Auto Parts|NAPA)$/.test(res.vendor)&&res.category!=='Fuel')res.category='Parts';
+  if(/car\s*wash/i.test(res.vendor||''))res.category='Cleaning / Detail';
   res.wash=findWashMembership(text,res);
   return res;
 }
