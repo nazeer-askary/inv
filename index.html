@@ -294,21 +294,35 @@ var KNOWN_VENDORS=[
 ];
 var FUEL_BRANDS=/buc.?ee|\bshell\b|exxon|\bmobil\b|chevron|texaco|valero|quik\s*trip|murphy|circle\s*k|7.?eleven|speedway|sunoco|phillips\s*66|conoco|\bbp\b|marathon|citgo|\bgulf\b|race\s*trac|\bstripes\b|love'?s|flying\s*j|\bpilot\b/i;
 var NOT_MONEY=/deductible|limit|coverage|policy|odometer|mileage|phone|fax|tel\b|zip|account|acct|claim\s*(no|number|#)|member|routing|price\s*\/?\s*gal|\/\s*gal|@\s*\$?\d|gallons?\b/i;
-function lastAmount(lines,re,not){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var a=amountsIn(l);if(a.length)return a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)return nx[nx.length-1];}}return null;}
+function lastAmount(lines,re,not){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var a=amountsIn(l);if(a.length)return a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)return nx[nx.length-1];
+    var pv=alone&&lines[i-1]&&!NOT_MONEY.test(lines[i-1])&&!re.test(lines[i-1])&&amountsIn(lines[i-1]);if(pv&&pv.length)return pv[pv.length-1];}}return null;}
 /* the figure you actually paid, best label first */
-var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
+var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid|base\s*am(?:oun)?t|sale\s*amount|purchase\s*amount|total\s*charged|amount\s*charged/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
 var NOT_TOTAL=/sub\s*-?\s*total|total\s*(parts|labor|labour|tax|discount|savings|units|hours|items?|price|cost\s*each|qty|quantity)|(parts|labor|labour|tax|paint|materials?|sublet|items?)\s*total|total\s*(qty|quantity)/i;
 function findTotal(lines){for(var k=0;k<TOTAL_LABELS.length;k++){var v=lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL);if(v!=null&&v>=0)return v;}return null;}
+/* dealer / shop invoices end with a summary box (PARTS, LABOR, SUBLET, FREIGHT, MISC, SALES TAX ... TOTAL). When the
+   TOTAL figure itself didn't scan (faint print at the edge), add up that box instead. Only lines that end in an
+   amount right after one of those labels count. */
+var SUMMARY_LINE=/\b(parts|labou?r|sublet|freight|misc\w*|shop\s*supplies|supplies|hazmat|environmental|disposal|fees?|sales\s*tax|tax)\b(?!\s*total)[^0-9$\n]{0,8}\$?\s?(-?\d{1,3}(?:,\d{3})*[.,]\d{2})\s*[\]}|)]*\s*$/i;
+function summaryTotal(lines){
+  /* only when the invoice has a TOTAL line whose figure didn't scan */
+  if(!lines.some(function(l){return /\btotal\b/i.test(l)&&!NOT_TOTAL.test(l)&&!amountsIn(l).length&&l.replace(/[^a-z]/gi,'').length<=14;}))return null;
+  var start=Math.floor(lines.length*.4),seen={},sum=0,n=0;
+  for(var i=start;i<lines.length;i++){var m=lines[i].match(SUMMARY_LINE);if(!m)continue;
+    var k=m[1].toLowerCase().replace(/\s+/g,' ');if(seen[k])continue;seen[k]=1;sum+=parseFloat(m[2].replace(/,/g,'').replace(/,(\d{2})$/,'.$1'));n++;}
+  return n>=2?Math.round(sum*100)/100:null;
+}
+
 /* category = the one whose keywords appear most (one stray word like "tire pressure" in an options list can't win) */
 var CAT_WORDS={
-  'Fuel':/\b(gallons?|gal\b|unleaded|unl\b|regular|reg\b|plus|premium|super|diesel|fuel|gasoline|gas\b|pump\s*#?\s*\d*|price\s*\/?\s*gal|ppg|e-?10|mid.?grade|octane)\b/gi,
+  'Fuel':/\b(gallons?|gal\b|unleaded|unl\b|diesel|gasoline|fuel\s*(sale|total|purchase)|pump\s*#?\s*\d+|price\s*\/?\s*gal|ppg|e-?10|mid.?grade|octane)\b/gi,
   'Tires':/\b(new tires?|tire (install|mount|repair|rotation)|mount (and|&) balance|wheel balanc\w*|alignment|tyres?|\d{3}\/\d{2}r\d{2})\b/gi,
   'Maintenance':/\b(oil change|lube|oil filter|air filter|cabin filter|state inspection|inspection fee|wiper|maintenance|tune.?up|coolant|transmission fluid|brake fluid|synthetic|multi.?point)\b/gi,
   'Cleaning / Detail':/\b(car wash|wash|detail\w*|vacuum|shampoo|interior clean\w*|odor)\b/gi,
   'Registration / Title':/\b(registration|title|tag renewal|dmv|county tax|license fee|txdmv)\b/gi,
   'Tolls / Citations':/\b(toll\w*|citation|parking ticket|violation|ez ?tag|hctra|txtag)\b/gi,
-  'Parts':/\b(autozone|o.?reilly|advance auto|napa|rockauto|part (no|number|#)|parts? only|core charge)\b/gi,
-  'Repair':/\b(repair\w*|labor|labour|brake pads?|rotors?|collision|body (shop|labor)|bumper|fender|diagnos\w*|alternator|battery|starter|suspension|strut|axle|refinish|paint|frame|radiator|headlamp|windshield)\b/gi
+  'Parts':/\b(autozone|o.?reilly|advance auto|napa|rockauto|part (no|number|#)|parts?|parts? only|core charge|restocking|will\s*call|list\s*price|counter\s*sale)\b/gi,
+  'Repair':/\b(locksmith|lockout|keys?|key\s*fob|fob|remote|transponder|ignition|rekey|repair\w*|labor|labour|brake pads?|rotors?|collision|body (shop|labor)|bumper|fender|diagnos\w*|alternator|battery|starter|suspension|strut|axle|refinish|paint|frame|radiator|headlamp|windshield)\b/gi
 };
 function guessCategory(t){
   if(FUEL_BRANDS.test(t)&&/gal|unleaded|unl\b|diesel|pump|fuel|regular|premium/i.test(t))return 'Fuel';
@@ -326,22 +340,30 @@ function findVendor(lines){
     if(l.length<4||l.length>60||NOT_VENDOR.test(l))return;
     var letters=(l.match(/[a-z]/gi)||[]).length;if(letters<l.length*.55||letters<4)return;
     var words=l.split(' ').length,score=-i*.3+(BIZ.test(l)?6:0)+(words>=2&&words<=6?2:-2)+(/^[A-Z0-9 &'.,-]+$/.test(l)?1:0);
+    var nx=(lines[i+1]||'').replace(/[^a-z.]/gi,'');if(/^(corp|corporation|inc|llc|co|ltd|lp)\.?$/i.test(nx))l=l+' '+nx.replace(/\.$/,'').toUpperCase().replace(/^(CORPORATION|LTD)$/,function(x){return x;});
     if(!best||score>best.s)best={l:l,s:score};});
   return best?best.l.slice(0,80):'';
 }
 var INV_LABELS=[
   /\b(?:invoice|inv)\s*(?:no\.?|number|num|#)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i,
   /\b(?:receipt|rcpt|ticket|tkt)\s*(?:no\.?|number|num|#)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
+  /\b(?:receipt|rcpt)\s*[:#.]\s*([A-Za-z0-9]{4,12})\b/i,
   /\b(?:trans(?:action)?|trx|tran|txn)\s*(?:id|no\.?|number|num|#)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{3,})/i,
   /\b(?:repair\s*order|work\s*order|r\.?o\.?|w\.?o\.?|order)\s*(?:no\.?|number|#)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
   /\b(?:ref(?:erence)?|seq(?:uence)?|estimate\s*id)\s*(?:no\.?|number|#|id)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{3,})/i
 ];
 function findInvoiceNo(lines){
+  /* label split across two lines: "...INVOICE" then "NUMBER 826729" */
+  for(var j=1;j<lines.length;j++){
+    if(!/invoice\W*$|invoice\s*\[?$/i.test(lines[j-1].trim())&&!/\binvoice\b/i.test(lines[j-1]))continue;
+    var mm=lines[j].match(/\b(?:number|no\.?|#)\s*[:#]?\s*([A-Z]{0,3}\d{4,}[A-Z0-9\-]*)/i);
+    if(mm&&!/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(mm[1]))return mm[1];
+  }
   for(var k=0;k<INV_LABELS.length;k++){
     for(var i=0;i<lines.length;i++){var l=lines[i];
       if(/auth|approval|card|acct|account|visa|master|amex|discover|debit|phone|tel\b|fax|store\s*#|pump|terminal|merchant|mid\b|tid\b/i.test(l)&&!/invoice|receipt|trans/i.test(l))continue;
       var m=l.match(INV_LABELS[k]);
-      if(m&&/\d/.test(m[1])&&!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(m[1])&&!/\*{2,}|x{3,}/i.test(l))return m[1].replace(/[.:]+$/,'');
+      if(m&&(/\d/.test(m[1])||/receipt|rcpt/i.test(l)&&/^[A-Za-z0-9]{4,12}$/.test(m[1])&&!/^(date|time|total|copy|paid|sale)$/i.test(m[1]))&&!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(m[1])&&!/\*{2,}|x{3,}/i.test(l))return m[1].replace(/[.:]+$/,'');
     }
   }
   return '';
@@ -354,7 +376,7 @@ function findOdometer(lines){
 }
 function parse(text){
   var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean),flat=lines.join('\n');
-  var total=findTotal(lines);
+  var total=findTotal(lines);if(total==null)total=summaryTotal(lines);
   var subtotal=lastAmount(lines,/sub\s*-?\s*total/i);
   var tax=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax/i);
   var all=[];lines.forEach(function(l){if(!NOT_MONEY.test(l))all=all.concat(amountsIn(l));});
@@ -363,15 +385,19 @@ function parse(text){
   var inv=findInvoiceNo(lines);
   var odo=findOdometer(lines);
   var items=[];lines.forEach(function(l){
-    if(/total|tax|balance|amount due|change|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal/i.test(l)||NOT_MONEY.test(l))return;
-    var a=amountsIn(l);if(!a.length)return;var desc=l.replace(/(?:\$\s?)?-?\d{1,3}(?:[,\s]\d{3})*[.,]\d{2}/g,'').replace(/\s{2,}/g,' ').trim();
+    if(/total|tax|balance|amount due|change|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal/i.test(l)||NOT_MONEY.test(l)||SUMMARY_LINE.test(l))return;
+    var a=amountsIn(l);if(!a.length)return;var desc=l.replace(/(?:\$\s?)?-?\d{1,3}(?:[,\s]\d{3})*[.,]\d{2}/g,'').replace(/[|\[\]{}\\_]+/g,' ').replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').trim();
     if(desc.replace(/[^a-z]/gi,'').length<3)return;items.push({desc:desc.slice(0,90),amount:a[a.length-1]});});
   /* car: a VIN or plate printed on the invoice */
   var up=flat.toUpperCase(),car=null,how='';
   CARS.forEach(function(c){if(car)return;if(c.vin&&(up.indexOf(c.vin)>=0||up.replace(/O/g,'0').indexOf(c.vin.replace(/O/g,'0'))>=0)){car=c;how='VIN';}});
   if(!car)CARS.forEach(function(c){if(car)return;var p=c.plate,re=new RegExp('\\b'+p.slice(0,3)+'[\\s\\-]?'+p.slice(3)+'\\b');if(re.test(up)){car=c;how='plate';}});
   if(!car)CARS.forEach(function(c){if(car||!c.vin)return;var tail=c.vin.slice(-6);if(new RegExp('VIN[^\\n]{0,25}'+tail).test(up)){car=c;how='VIN ending '+tail;}});
-  return {vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how};
+  /* no VIN or plate printed: note any fleet make the invoice mentions ("Hyundai x 1") so the car search can start there */
+  var makeHint='';
+  if(!car){var makes={};CARS.forEach(function(c){var m=String(c.name).replace(/^\d{4}\s+/,'').split(' ')[0];if(m)makes[m.toLowerCase()]=m;});
+    Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
+  return {makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how};
 }
 
 /* ---------- finding a car by plate, year, make, model or color ---------- */
@@ -421,7 +447,7 @@ function newInvoice(files){
 function setStatus(o,txt,cls){var s=document.querySelector('#'+o.id+' [data-st]');s.textContent=txt;s.className='status'+(cls?' '+cls:'');}
 function carFor(plate){plate=String(plate||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return CARS.filter(function(c){return c.plate===plate;})[0]||null;}
 function showCar(o){var el=document.getElementById(o.id),p=el.querySelector('[data-f=plate]').value,c=carFor(p),n=el.querySelector('[data-carname]');
-  n.textContent=c?(o.carHow&&p===o.autoPlate?'Found by '+o.carHow+' on the invoice':o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
+  n.textContent=c?(o.carHow&&p===o.autoPlate?'Found by '+o.carHow+' on the invoice':o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice mentions '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
 function addPages(o,files){
   var el=document.getElementById(o.id);o.state='reading';setStatus(o,'Reading…');el.querySelector('.bar').classList.remove('hidden');
   var list=[].slice.call(files);
@@ -435,7 +461,12 @@ function fill(o){
   var el=document.getElementById(o.id),r=parse(o.text),f=function(k){return el.querySelector('[data-f='+k+']');};
   el.querySelector('.bar').classList.add('hidden');el.querySelector('[data-form]').classList.remove('hidden');
   var keep=function(k,v){if(v!=null&&v!==''&&(!f(k).value||o.imgs.length===1||k!=='plate'))f(k).value=v;};
-  if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;pickCar(o,r.car);}else if(!f('plate').value){var lp=carFor(load('er_inv_lastplate'));if(lp){o.carHow='';o.lastUsed=lp.plate;pickCar(o,lp);}}
+  if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;pickCar(o,r.car);}
+  else if(!f('plate').value){var lp=carFor(load('er_inv_lastplate'));
+    if(r.makeHint&&!(lp&&lp.name.toLowerCase().indexOf(r.makeHint.toLowerCase())>=0)){
+      /* the invoice names a make: start the car search there and let the person tap the right one */
+      o.makeHint=r.makeHint;var q=el.querySelector('[data-carq]');q.value=r.makeHint;carList(o,r.makeHint);}
+    else if(lp){o.carHow='';o.lastUsed=lp.plate;pickCar(o,lp);}}
   keep('date',r.date);keep('vendor',r.vendor);keep('invoice_no',r.invoice_no);keep('odometer',r.odometer);
   if(r.total!=null)f('total').value=r.total.toFixed(2);if(r.subtotal!=null)f('subtotal').value=r.subtotal.toFixed(2);if(r.tax!=null)f('tax').value=r.tax.toFixed(2);
   if(o.imgs.length===1||f('category').value==='Other')f('category').value=r.category;
