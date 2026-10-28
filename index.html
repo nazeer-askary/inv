@@ -63,6 +63,10 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
 .list b{font-variant-numeric:tabular-nums}
 .gate{max-width:420px;margin:12vh auto 0}
 .gate h2{margin:0 0 6px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg);padding:4px;border-radius:12px;margin-bottom:6px}
+.tabs button{font:inherit;font-weight:650;font-size:14px;border:none;border-radius:9px;padding:9px;background:none;color:var(--ink2)}
+.tabs button.on{background:var(--card);color:var(--brand);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.who{font-size:12.5px;opacity:.85;font-weight:600;margin-right:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));max-width:600px;margin:0 auto;background:#16305C;color:#fff;padding:12px 14px;border-radius:12px;font-weight:600;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:20;display:none}
 .lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:30}
 .lb img{max-width:96vw;max-height:92vh}
@@ -74,19 +78,32 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
 <header>
   <h1>Easy <b>Rentalz</b> · Invoices</h1>
   <button id="recentBtn" class="hidden" type="button">Saved</button>
-  <button id="lockBtn" class="hidden" type="button" title="Forget the passcode on this phone">Lock</button>
+  <span id="who" class="who hidden"></span>
+  <button id="lockBtn" class="hidden" type="button" title="Sign out on this phone">Sign out</button>
 </header>
 
 <main>
-  <!-- passcode gate -->
+  <!-- join / sign in -->
   <section id="gate" class="card gate hidden">
-    <h2>Enter passcode</h2>
-    <p class="muted">Asked once on each phone. It's stored only on this device.</p>
-    <form id="gateForm">
-      <input id="pass" type="password" autocomplete="current-password" placeholder="Passcode" required>
-      <div class="actions"><button class="btn primary" type="submit">Unlock</button></div>
-      <p id="gateErr" class="status err hidden"></p>
+    <div class="tabs"><button type="button" data-tab="join" class="on">New here? Join</button><button type="button" data-tab="login">Sign in</button></div>
+    <form id="joinForm" autocomplete="on">
+      <p class="muted">First time on this phone. We record who uploads each invoice.</p>
+      <label for="jTeam">Team code</label><input id="jTeam" type="password" autocomplete="off" required>
+      <label for="jName">Full name</label><input id="jName" autocomplete="name" placeholder="First and last name" required>
+      <label for="jEmail">Email</label><input id="jEmail" type="email" autocomplete="email" inputmode="email" autocapitalize="off" required>
+      <label for="jPhone">Phone</label><input id="jPhone" type="tel" autocomplete="tel" inputmode="tel" placeholder="(713) 555-0100" required>
+      <label for="jPass">Choose your passcode</label><input id="jPass" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters" required>
+      <label for="jPass2">Type it again</label><input id="jPass2" type="password" autocomplete="new-password" minlength="6" required>
+      <div class="actions"><button class="btn primary" type="submit">Join</button></div>
     </form>
+    <form id="loginForm" class="hidden" autocomplete="on">
+      <p class="muted">Already joined? Use your email and the passcode you chose.</p>
+      <label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" required>
+      <label for="lPass">Your passcode</label><input id="lPass" type="password" autocomplete="current-password" required>
+      <div class="actions"><button class="btn primary" type="submit">Sign in</button></div>
+      <p class="muted" style="margin-top:10px">Forgot your passcode? Ask Nazeer to reset it, then join again.</p>
+    </form>
+    <p id="gateErr" class="status err hidden"></p>
   </section>
 
   <section id="app" class="hidden">
@@ -103,7 +120,7 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
           <input id="libIn" type="file" accept="image/*" multiple class="hidden">
         </label>
       </div>
-      <p class="muted" style="margin:10px 2px 0">Each photo becomes one invoice. For a multi-page invoice, add the other pages with “+ page”. The text is read on this phone; check the fields, then save.</p>
+      <p class="muted" style="margin:10px 2px 0">Each photo becomes one invoice, saved under your name. For a multi-page invoice, add the other pages with “+ page”. The text is read on this phone; check the fields, then save.</p>
     </div>
 
     <div id="invoices"></div>
@@ -127,7 +144,7 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
 'use strict';
 var API='https://ovhijhkosaljyqapehoz.supabase.co/functions/v1/invoice-intake';
 var CATS=['Maintenance','Repair','Tires','Parts','Cleaning / Detail','Registration / Title','Tolls / Citations','Other'];
-var CARS=[],PASS='',seq=0,INV={};
+var CARS=[],SESSION='',seq=0,INV={};
 var $=function(id){return document.getElementById(id);};
 function store(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){}}
 function load(k){try{return localStorage.getItem(k);}catch(e){return null;}}
@@ -137,24 +154,45 @@ function money(n){return n==null||isNaN(n)?'':'$'+Number(n).toLocaleString('en-U
 
 /* ---------- API ---------- */
 function api(method,qs,body){
-  return fetch(API+(qs||''),{method:method,headers:Object.assign({'x-passcode':PASS},body?{'Content-Type':'application/json'}:{}),body:body?JSON.stringify(body):undefined})
-    .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('Error '+r.status));return j;});});
+  return fetch(API+(qs||''),{method:method,headers:Object.assign(SESSION?{'x-session':SESSION}:{},body?{'Content-Type':'application/json'}:{}),body:body?JSON.stringify(body):undefined})
+    .then(function(r){return r.json().then(function(j){
+      if(!r.ok){if(j.signin&&SESSION){SESSION='';store('er_inv_session',null);showGate('login');}throw new Error(j.error||('Error '+r.status));}
+      return j;});});
 }
 
-/* ---------- passcode gate ---------- */
-function unlock(p){
-  PASS=p;
+/* ---------- join / sign in ---------- */
+function deviceId(){var d=load('er_inv_device');if(!d){d=(crypto.randomUUID?crypto.randomUUID():String(Date.now())+Math.random().toString(16).slice(2));store('er_inv_device',d);}return d;}
+function deviceName(){var u=navigator.userAgent,os=/iPhone/.test(u)?'iPhone':/iPad/.test(u)?'iPad':/Android/.test(u)?'Android':/Mac/.test(u)?'Mac':/Windows/.test(u)?'Windows':'Device';
+  var br=/CriOS|Chrome/.test(u)&&!/Edg/.test(u)?'Chrome':/FxiOS|Firefox/.test(u)?'Firefox':/Edg/.test(u)?'Edge':/Safari/.test(u)?'Safari':'Browser';return os+' · '+br;}
+function showGate(tab){$('app').classList.add('hidden');$('recentBtn').classList.add('hidden');$('lockBtn').classList.add('hidden');$('who').classList.add('hidden');
+  $('gate').classList.remove('hidden');setTab(tab||'join');}
+function setTab(t){[].forEach.call(document.querySelectorAll('.tabs button'),function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});
+  $('joinForm').classList.toggle('hidden',t!=='join');$('loginForm').classList.toggle('hidden',t!=='login');$('gateErr').classList.add('hidden');}
+[].forEach.call(document.querySelectorAll('.tabs button'),function(b){b.onclick=function(){setTab(b.getAttribute('data-tab'));};});
+function gateErr(m){var e=$('gateErr');e.textContent=m;e.classList.remove('hidden');}
+function enter(){
   return api('GET','?what=fleet').then(function(j){
-    CARS=j.cars||[];store('er_inv_pass',p);
+    CARS=j.cars||[];
     $('plates').innerHTML=CARS.map(function(c){return '<option value="'+esc(c.plate)+'">'+esc(c.name)+'</option>';}).join('');
-    $('gate').classList.add('hidden');$('app').classList.remove('hidden');$('recentBtn').classList.remove('hidden');$('lockBtn').classList.remove('hidden');
+    var nm=(j.user&&j.user.name)||'';store('er_inv_user',nm);$('who').textContent=nm.split(' ')[0];$('who').title='Signed in as '+nm+(j.user?' ('+j.user.email+')':'');
+    $('gate').classList.add('hidden');$('app').classList.remove('hidden');['recentBtn','lockBtn','who'].forEach(function(id){$(id).classList.remove('hidden');});
   });
 }
-$('gateForm').onsubmit=function(e){e.preventDefault();var p=$('pass').value.trim();$('gateErr').classList.add('hidden');
-  unlock(p).catch(function(err){PASS='';$('gateErr').textContent=err.message;$('gateErr').classList.remove('hidden');});};
-$('lockBtn').onclick=function(){store('er_inv_pass',null);location.reload();};
-var saved=load('er_inv_pass');
-if(saved)unlock(saved).catch(function(){store('er_inv_pass',null);$('gate').classList.remove('hidden');});else $('gate').classList.remove('hidden');
+function signedIn(j){SESSION=j.token;store('er_inv_session',j.token);return enter().then(function(){toast('Welcome, '+j.user.name.split(' ')[0]);});}
+function busy(form,on){[].forEach.call(form.querySelectorAll('button,input'),function(x){x.disabled=on;});}
+$('joinForm').onsubmit=function(e){e.preventDefault();var f=this;
+  if($('jPass').value!==$('jPass2').value){gateErr('The two passcodes don’t match');return;}
+  busy(f,true);$('gateErr').classList.add('hidden');
+  api('POST','?what=register',{team_code:$('jTeam').value.trim(),full_name:$('jName').value.trim(),email:$('jEmail').value.trim(),phone:$('jPhone').value.trim(),
+    passcode:$('jPass').value,device_id:deviceId(),device_name:deviceName()})
+    .then(signedIn).catch(function(err){gateErr(err.message);if(/already registered/i.test(err.message)){$('lEmail').value=$('jEmail').value;}}).then(function(){busy(f,false);});};
+$('loginForm').onsubmit=function(e){e.preventDefault();var f=this;busy(f,true);$('gateErr').classList.add('hidden');
+  api('POST','?what=login',{email:$('lEmail').value.trim(),passcode:$('lPass').value,device_id:deviceId(),device_name:deviceName()})
+    .then(signedIn).catch(function(err){gateErr(err.message);}).then(function(){busy(f,false);});};
+$('lockBtn').onclick=function(){if(!confirm('Sign out on this phone?'))return;api('POST','?what=logout',{}).catch(function(){}).then(function(){SESSION='';store('er_inv_session',null);location.reload();});};
+store('er_inv_pass',null);   /* the old shared-passcode sign-in is gone */
+SESSION=load('er_inv_session')||'';
+if(SESSION)enter().catch(function(){showGate('login');});else showGate(load('er_inv_user')?'login':'join');
 
 /* ---------- images ---------- */
 function fileToImg(file){return new Promise(function(res,rej){var u=URL.createObjectURL(file),i=new Image();i.onload=function(){res(i);};i.onerror=function(){rej(new Error('Could not open that photo'));};i.src=u;});}
@@ -328,7 +366,7 @@ function save(o){
   o.state='saving';setStatus(o,'Saving…');el.querySelector('[data-save]').disabled=true;
   b.image=stack(o.imgs);
   return api('POST','',b).then(function(j){
-    o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')','ok');
+    o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')'+(j.by?' · by '+j.by:''),'ok');
     el.querySelector('[data-form]').classList.add('hidden');el.querySelector('[data-del]').textContent='×';updateSaveAll();toast('Saved '+money(j.amount)+' to '+j.plate);
   }).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
 }
@@ -353,7 +391,7 @@ $('invoices').addEventListener('click',function(e){
 $('lb').onclick=function(){this.style.display='none';};
 $('saveAll').onclick=function(){var ids=Object.keys(INV).filter(function(k){return INV[k].state==='ready';});ids.reduce(function(p,k){return p.then(function(){return save(INV[k]);});},Promise.resolve());};
 $('recentBtn').onclick=function(){var r=$('recent');r.classList.remove('hidden');r.scrollIntoView({behavior:'smooth'});$('recentList').innerHTML='<li class="muted">Loading…</li>';
-  api('GET','?what=recent').then(function(j){var l=j.invoices||[];$('recentList').innerHTML=l.length?l.map(function(x){return '<li><span>'+esc(x.date||'')+' · <b>'+esc(x.plate||'')+'</b> · '+esc(x.vendor||x.category||'')+'</span><b>'+money(x.amount)+'</b></li>';}).join(''):'<li class="muted">Nothing saved from phones yet.</li>';})
+  api('GET','?what=recent').then(function(j){var l=j.invoices||[];$('recentList').innerHTML=l.length?l.map(function(x){return '<li><span>'+esc(x.date||'')+' · <b>'+esc(x.plate||'')+'</b> · '+esc(x.vendor||x.category||'')+(x.uploaded_by_name?'<br><span class="muted">by '+esc(x.uploaded_by_name)+'</span>':'')+'</span><b>'+money(x.amount)+'</b></li>';}).join(''):'<li class="muted">Nothing saved from phones yet.</li>';})
   .catch(function(e){$('recentList').innerHTML='<li class="muted">'+esc(e.message)+'</li>';});};
 $('recentClose').onclick=function(){$('recent').classList.add('hidden');};
 window.addEventListener('beforeunload',function(e){if(Object.keys(INV).some(function(k){return INV[k].state==='ready'||INV[k].state==='reading';})){e.preventDefault();e.returnValue='';}});
