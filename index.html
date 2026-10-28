@@ -272,6 +272,11 @@ function findPapers(img){
     if(shade&&b.x0-a.x1<=w*.4&&Math.abs(a.y0-b.y0)<=h*.06&&Math.abs(a.y1-b.y1)<=h*.06){
       var m={n:a.n+b.n,x0:a.x0,y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)};m.bw=m.x1-m.x0+1;m.bh=m.y1-m.y0+1;m.share=m.bw*m.bh/N;m.solid=m.n/(m.bw*m.bh);m.score=m.n*m.solid;
       big.splice(j-1,2,m);j--;}}
+  /* a shadow across a long receipt cuts it into a top and a bottom piece, one above the other: put them back together */
+  var joinV=function(a,b){return {n:a.n+b.n,x0:Math.min(a.x0,b.x0),y0:Math.min(a.y0,b.y0),x1:Math.max(a.x1,b.x1),y1:Math.max(a.y1,b.y1)};};
+  for(var u=0;u<big.length;u++)for(var v=u+1;v<big.length;v++){var A=big[u],B=big[v],ov=Math.min(A.x1,B.x1)-Math.max(A.x0,B.x0),gap=Math.max(A.y0,B.y0)-Math.min(A.y1,B.y1);
+    if(Math.min(A.bw,B.bw)>=0.75*Math.max(A.bw,B.bw)&&Math.abs(A.x0-B.x0)<=0.15*Math.max(A.bw,B.bw)&&ov>=0.75*Math.min(A.bw,B.bw)&&gap<=h*.12&&A.bh>=A.bw*.6&&B.bh>=B.bw*.6){var mm=joinV(A,B);mm.bw=mm.x1-mm.x0+1;mm.bh=mm.y1-mm.y0+1;mm.share=mm.bw*mm.bh/N;mm.solid=mm.n/(mm.bw*mm.bh);mm.score=mm.n*mm.solid;
+      big.splice(v,1);big.splice(u,1,mm);v=u;}}
   return big.map(function(cp){
     var mx=Math.round(cp.bw*.04)+2,my=Math.round(cp.bh*.03)+2;
     var sx=Math.max(0,(cp.x0-mx)/k),sy=Math.max(0,(cp.y0-my)/k),sw=Math.min(W-sx,(cp.bw+2*mx)/k),sh=Math.min(H-sy,(cp.bh+2*my)/k);
@@ -281,7 +286,75 @@ function findPapers(img){
 }
 /* the main receipt: crop to it when it doesn't already fill nearly the whole photo */
 function cropPaper(img){var ps=findPapers(img);if(!ps.length)return null;var best=ps.reduce(function(m,c){return c._share>m._share?c:m;},ps[0]);return best;}
-function rotate180(img){var W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,c=document.createElement('canvas');c.width=W;c.height=H;var x=c.getContext('2d');x.translate(W,H);x.rotate(Math.PI);x.drawImage(img,0,0,W,H);return c;}
+/* Licence plates in the background of a receipt photo: small light rectangles about twice as wide as tall.
+   Returns enlarged crops of the likeliest few, for a one-line read. */
+function plateCrops(img){
+  var W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,k=Math.min(1,480/Math.max(W,H));
+  var w=Math.max(1,Math.round(W*k)),h=Math.max(1,Math.round(H*k)),c=document.createElement('canvas');c.width=w;c.height=h;
+  var x=c.getContext('2d');x.drawImage(img,0,0,w,h);var p=x.getImageData(0,0,w,h).data,N=w*h,i,out=[];
+  [0.62,0.5,0.75].forEach(function(f){
+    var lum=new Float32Array(N),nl=[],mask=new Uint8Array(N);
+    for(i=0;i<N;i++){var r=p[i*4],g=p[i*4+1],b=p[i*4+2];lum[i]=(r+g+b)/3;if(Math.max(r,g,b)-Math.min(r,g,b)<45)nl.push(lum[i]);}
+    nl.sort(function(a,b){return a-b;});var thr=nl.length?Math.max(110,nl[Math.floor(nl.length*.97)]*f):200;
+    for(i=0;i<N;i++){var r2=p[i*4],g2=p[i*4+1],b2=p[i*4+2];mask[i]=(lum[i]>=thr&&Math.max(r2,g2,b2)-Math.min(r2,g2,b2)<45)?1:0;}
+    var seen=new Uint8Array(N),st=[];
+    for(i=0;i<N;i++){if(!mask[i]||seen[i])continue;var n=0,x0=w,y0=h,x1=0,y1=0;st.push(i);seen[i]=1;
+      while(st.length){var q=st.pop(),qx=q%w,qy=(q/w)|0;n++;if(qx<x0)x0=qx;if(qx>x1)x1=qx;if(qy<y0)y0=qy;if(qy>y1)y1=qy;
+        if(qx>0&&!seen[q-1]&&mask[q-1]){seen[q-1]=1;st.push(q-1);}if(qx<w-1&&!seen[q+1]&&mask[q+1]){seen[q+1]=1;st.push(q+1);}
+        if(qy>0&&!seen[q-w]&&mask[q-w]){seen[q-w]=1;st.push(q-w);}if(qy<h-1&&!seen[q+w]&&mask[q+w]){seen[q+w]=1;st.push(q+w);}}
+      var bw=x1-x0+1,bh=y1-y0+1,ar=bw/bh,sh=bw*bh/N,so=n/(bw*bh);
+      if(bw>=24&&ar>=1.4&&ar<=3.2&&sh>=0.004&&sh<=0.08&&so>=0.4&&so<=0.92)out.push({x0:x0,y0:y0,bw:bw,bh:bh,s:so*Math.min(1,Math.abs(ar-2.1)<0.6?1:0.7)});}
+  });
+  /* drop near-duplicates found at more than one brightness bar */
+  out.sort(function(a,b){return b.s-a.s;});var keep=[];
+  out.forEach(function(o){if(keep.length<5&&!keep.some(function(q){return Math.abs(q.x0-o.x0)<o.bw*.3&&Math.abs(q.y0-o.y0)<o.bh*.3;}))keep.push(o);});
+  return keep.map(function(o){var mx=o.bw*.06,my=o.bh*.1,sx=Math.max(0,(o.x0-mx)/k),sy=Math.max(0,(o.y0-my)/k),sw=Math.min(W-sx,(o.bw+2*mx)/k),sh2=Math.min(H-sy,(o.bh+2*my)/k);
+    var up=Math.max(1,900/sw),cv=document.createElement('canvas');cv.width=Math.round(sw*up);cv.height=Math.round(sh2*up);var cx=cv.getContext('2d');cx.imageSmoothingQuality='high';cx.drawImage(img,sx,sy,sw,sh2,0,0,cv.width,cv.height);return cv;});
+}
+/* the middle band of a plate crop (the big characters), black on white, for a one-line read */
+function plateBand(cv,a,b){var W=cv.width,H=cv.height,y0=Math.round(H*a),hh=Math.max(1,Math.round(H*(b-a))),o=document.createElement('canvas');o.width=W;o.height=hh;
+  var x=o.getContext('2d');x.drawImage(cv,0,y0,W,hh,0,0,W,hh);var d=x.getImageData(0,0,W,hh),p=d.data,hist=new Array(256).fill(0),i,t;
+  for(i=0;i<p.length;i+=4){var g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=g;hist[g]++;}
+  var tot=p.length/4,sum=0,sB=0,wB=0,mx=0,th=128;for(t=0;t<256;t++)sum+=t*hist[t];
+  for(t=0;t<256;t++){wB+=hist[t];if(!wB)continue;var wF=tot-wB;if(!wF)break;sB+=t*hist[t];var mB=sB/wB,mF=(sum-sB)/wF,v=wB*wF*(mB-mF)*(mB-mF);if(v>mx){mx=v;th=t;}}
+  for(i=0;i<p.length;i+=4){var q=p[i]>th?255:0;p[i]=p[i+1]=p[i+2]=q;}x.putImageData(d,0,0);return o;}
+/* a fleet plate in what the plate crops read as. Look-alike letters and digits count as equal. One read within one
+   character of a plate is enough; within two characters it takes two reads agreeing, and no other plate as close. */
+function plateFromReads(reads){
+  var nv=function(s){return String(s).replace(/q/g,'9').toUpperCase().replace(/[OQD]/g,'0').replace(/[IL|]/g,'1').replace(/S/g,'5').replace(/B/g,'8').replace(/Z/g,'2').replace(/G/g,'6');};
+  var score={};
+  reads.forEach(function(text){var t=nv(String(text).replace(/TEXAS|ADVANTAGE|FRED\s*HAAS|LONE\s*STAR/gi,' ').replace(/[^A-Za-z0-9]/g,''));
+    CARS.forEach(function(c){if(!c.plate||c.plate.length<6)return;var v=nv(c.plate),best=9;
+      for(var off=0;off<=t.length-v.length;off++){var d=0;for(var q=0;q<v.length&&d<3;q++)if(t[off+q]!==v[q])d++;if(d<best)best=d;}
+      if(best<=2){var s=score[c.plate]||(score[c.plate]={c:c,one:0,two:0});if(best<=1)s.one++;else s.two++;}});});
+  var ks=Object.keys(score);
+  var ones=ks.filter(function(k){return score[k].one;});if(ones.length===1)return score[ones[0]].c;if(ones.length>1)return null;
+  var twos=ks.filter(function(k){return score[k].two>=2;});return twos.length===1&&ks.length===1?score[twos[0]].c:null;
+}
+function rotateImg(img,deg){var W=img.naturalWidth||img.width,H=img.naturalHeight||img.height,c=document.createElement('canvas'),side=deg%180!==0;c.width=side?H:W;c.height=side?W:H;
+  var x=c.getContext('2d');x.translate(c.width/2,c.height/2);x.rotate(deg*Math.PI/180);x.drawImage(img,-W/2,-H/2,W,H);return c;}
+/* Read one photo in stages and stop as soon as vendor, date and total are all found (and, on a fuel receipt, gallons x
+   price = total): the cropped receipt, the crop with shadows evened out, the whole photo evened out, the whole photo
+   as is. Keep the best reading. Mostly junk: try it upside down. No car found: look for a plate. */
+function readImage(img,status,bar){
+  var crop=cropPaper(img),best=null,carSeen=null,invSeen='',plateSeen=null,memSeen='';
+  var tries=crop?[function(){return forOcr(crop);},function(){return forOcrEven(crop);},function(){return forOcrEven(img);},function(){return forOcr(img);}]:[function(){return forOcr(img);},function(){return forOcrEven(img);}];
+  var run=function(mk){return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(r.invoice_no&&!invSeen)invSeen=r.invoice_no;if(r.wash&&r.wash.member_no&&!memSeen)memSeen=r.wash.member_no;
+    if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor&&(!!invSeen||!INV_ASKED.test(t))&&r.fuelOk!==false&&!(r.wash&&!memSeen);});};
+  var seq=function(list,msg){return list.reduce(function(pp,mk,ix){return pp.then(function(done){if(done)return true;status(msg(ix));return run(mk);});},Promise.resolve(false));};
+  var good=function(){var rb=best&&parse(best.t);return !!(rb&&(rb.total!=null||rb.date)&&best.sc>=14);};
+  return seq(tries,function(ix){return ix?'Reading… (trying a clearer version)':'Reading…';})
+    .then(function(done){if(done||good())return;var base=crop||img,rot=rotateImg(base,180);
+      return seq([function(){return forOcr(rot);},function(){return forOcrEven(rot);}],function(){return 'Reading… (turning it the right way up)';})
+;})
+    .then(function(){if(carSeen||!crop)return;var cs=plateCrops(img).slice(0,3),reads=[];if(!cs.length)return;status('Looking for a licence plate in the photo…');
+      cs=cs.slice(0,2);var live=false;
+      var one=function(mk,psm,first){return function(){if(plateFromReads(reads)||(!first&&!live))return;return ocr(mk(),null,psm).then(function(t){reads.push(t);if(first)live=(String(t).match(/[A-Za-z0-9]/g)||[]).length>=4;});};};
+      var jobs=[];cs.forEach(function(cv){jobs.push(one(function(){return plateBand(cv,.25,.8);},'7',1),one(function(){return plateBand(cv,.2,.85);},'7'),one(function(){return forOcr(cv);},'6'));});
+      return jobs.reduce(function(pp,j){return pp.then(j);},Promise.resolve()).then(function(){plateSeen=plateFromReads(reads);});})
+    .then(function(){var t=best?best.t:'',r=parse(t);if(!r.car&&carSeen)t+='\n'+carSeen.vin;else if(!r.car&&plateSeen)t+='\nPLATE IN PHOTO '+plateSeen.plate;
+      if(invSeen&&!r.invoice_no)t+='\nInvoice Number: '+invSeen;if(memSeen&&r.wash&&!r.wash.member_no)t+='\nYour barcode number is '+memSeen;return t;});
+}
 function forOcr(img){
   var c=scaled(img,(img.width&&!img.naturalWidth)?3200:2200),x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Array(256).fill(0),n=p.length/4;
   for(var i=0;i<p.length;i+=4){var g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=p[i+1]=p[i+2]=g;h[g]++;}
@@ -310,7 +383,7 @@ function forOcrEven(img){
   x.putImageData(d,0,0);return c;
 }
 /* how much useful information a reading found: real words plus the fields we need */
-function readScore(text){var r=parse(text);return wordCount(text)*0.2+(r.total!=null?6:0)+(r.date?5:0)+(r.vendor?3:0)+(r.invoice_no?2:0)+(r.car?6:0);}
+function readScore(text){var r=parse(text);return wordCount(text)*0.2+(r.total!=null?6:0)+(r.date?5:0)+(r.vendor?3:0)+(r.invoice_no?2:0)+(r.car?6:0)+(r.fuelOk?5:0);}
 /* pages stacked into one JPEG for upload */
 function stack(imgs){
   var w=1400,parts=imgs.map(function(im){var iw=im.naturalWidth||im.width,ih=im.naturalHeight||im.height,s=Math.min(1,w/iw);return {im:im,w:Math.round(iw*s),h:Math.round(ih*s)};});
@@ -327,8 +400,13 @@ function worker(){
   return workerP;
 }
 var queue=Promise.resolve();
-function ocr(canvas,onProgress){
-  var job=queue.then(function(){return worker();}).then(function(w){progressCb=onProgress;return w.recognize(canvas);}).then(function(r){progressCb=null;return r.data.text||'';});
+function ocr(canvas,onProgress,psm){
+  var job=queue.then(function(){return worker();}).then(function(w){progressCb=onProgress;
+      if(!psm)return w.recognize(canvas);
+      /* a one-line read (a licence plate), then back to the reader's default (one block of text) */
+      return w.setParameters({tessedit_pageseg_mode:psm}).then(function(){return w.recognize(canvas);})
+        .then(function(r){return w.setParameters({tessedit_pageseg_mode:'6'}).then(function(){return r;});},function(e){return w.setParameters({tessedit_pageseg_mode:'6'}).then(function(){throw e;});});})
+    .then(function(r){progressCb=null;return r.data.text||'';});
   queue=job.catch(function(){});return job;
 }
 
@@ -354,6 +432,9 @@ function findDate(lines){
         re4=/\b(\d{1,2})[\s\-]?(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*[\s\-,]*'?(\d{2,4})\b/gi;
     while((m=re1.exec(l))){var d0=iso(+m[3],+m[1],+m[2]);
       if(!d0&&m[3].length===4){var bestv=null;digitVariants(m[1]+'|'+m[2]+'|'+m[3],3).forEach(function(v){var q=v.s.split('|'),d=iso(+q[2],+q[0],+q[1]);if(d&&(!bestv||v.c<bestv.c))bestv={d:d,c:v.c};});if(bestv)d0=bestv.d;}
+      /* a digit of the month lost at the paper's edge ("1/20/2026" for 10/20/2026): an old date becomes a recent one */
+      if(d0&&m[1].length===1&&m[3].length===4&&/^\W{0,2}$/.test(l.slice(0,m.index+(m[0].length-m[0].replace(/^[^\d]/,'').length)))&&(new Date()-new Date(d0))>60*864e5){
+        var rec=null;['10','11','12'].forEach(function(mo){if(mo[0]!==m[1]&&mo[1]!==m[1])return;var dd=iso(+m[3],+mo,+m[2]);if(dd&&(new Date()-new Date(dd))<=60*864e5&&(!rec||dd>rec))rec=dd;});if(rec)d0=rec;}
       cands.push(d0);}
     while((m=re2.exec(l)))cands.push(iso(+m[1],+m[2],+m[3]));
     while((m=re3.exec(l)))cands.push(iso(+m[3],MONTHS[m[1].toLowerCase()],+m[2]));
@@ -363,35 +444,40 @@ function findDate(lines){
   return best&&best.d;
 }
 var KNOWN_VENDORS=[
-  ["Buc-ee's",/buc.?ee/i],['Shell',/\bshell\b/i],['Exxon',/\bexxon|xxon\s*express|express\s*pay\b/i],['Mobil',/\bmobil\b/i],['Chevron',/\bchevron/i],['Texaco',/\btexaco/i],
+  ["Buc-ee's",/buc.?ee/i],['Shell',/\bshell\b/i],['Exxon',/\bexxon|xxon\s*express|express\s*pay\b/i],['Mobil',/\bmobil\b/i],['Chevron',/\bchevron/i],['Texaco',/texaco/i],
   ['Valero',/\bvalero/i],['QuikTrip',/quik\s*trip|\bQT\s*#?\d/i],['Murphy USA',/murphy\s*(usa|express)/i],['Circle K',/circle\s*k\b/i],
   ['7-Eleven',/7.?eleven|\b7-11\b/i],['Speedway',/speedway/i],['Sunoco',/sunoco/i],['Phillips 66',/phillips\s*66/i],['Conoco',/conoco/i],
   ['BP',/^\W*bp\b|\bbp\s*(?:#|\d|gas|station|express|connect)|amoco/im],['Marathon',/\bmarathon\b/i],['Citgo',/citgo/i],['Gulf',/\bgulf\b/i],['RaceTrac',/race\s*trac/i],['Stripes',/\bstripes\b/i],
   ["Love's",/\blove'?s\b/i],['Pilot',/\bpilot\b/i],['Flying J',/flying\s*j/i],['Timewise',/time\s*wise/i],['EZ Mart',/ez\s*mart/i],['Kwik',/\bkwik/i],
   ['Costco',/costco/i],["Sam's Club",/sam'?s\s*club/i],['Walmart',/wal.?mart/i],['H-E-B',/\bh.?e.?b\b/i],['Kroger',/kroger/i],
   ['AutoZone',/auto\s*zone/i],["O'Reilly Auto Parts",/o.?reilly/i],['Advance Auto Parts',/advance\s*auto/i],['NAPA',/\bnapa\b/i],
-  ['Firestone',/firestone/i],['Goodyear',/goodyear/i],['Discount Tire',/discount\s*tire/i],['Jiffy Lube',/jiffy\s*lube/i],['Valvoline',/valvoline/i],
+  ['Firestone',/firestone/i],['Goodyear',/goodyear/i],['Discount Tire',/discount\s*tire|treadwell|\bTXH\s*:?\s*\d/i],['Jiffy Lube',/jiffy\s*lube/i],['Valvoline',/valvoline/i],
   ['Take 5',/take\s*5/i],['Midas',/\bmidas\b/i],['Pep Boys',/pep\s*boys/i],['Meineke',/meineke/i],['Christian Brothers',/christian\s*brothers/i],
-  ['Mister Car Wash',/mister\s*car\s*wash|mistercarwash/i],["Tommy's Express Car Wash",/tommy'?s\s*express/i],['Quick Quack Car Wash',/quick\s*quack/i],['Zips Car Wash',/zips\s*car\s*wash/i],['Super Star Car Wash',/super\s*star\s*car\s*wash/i],['Take 5 Car Wash',/take\s*5\s*car\s*wash/i],
+  ['Mister Car Wash',/[mn]ister\s*car\s*wash|mistercarwash|\bmister\b|\bUWC\s*sign|unlimited\s*wash\s*club/i],["Tommy's Express Car Wash",/tommy'?s\s*express/i],['Quick Quack Car Wash',/quick\s*quack/i],['Zips Car Wash',/zips\s*car\s*wash/i],['Super Star Car Wash',/super\s*star\s*car\s*wash/i],['Take 5 Car Wash',/take\s*5\s*car\s*wash/i],
   ['Best Auto Professional USA',/best\s*a\w{0,3}\s*profes|professional\s*usa|\bnal\s*usa\b/i],['Mobilco Locksmith & Security',/mobilco/i],
+  ['Trac Fuel',/\b\w{0,3}AC\W{0,2}\s*FUEL|\w115\s*hillcroft\s*av/i,1],['Swipe For Fuel',/swipe\s*for\s*fuel|\bfor\s*fuel\s*#/i,1],['Stop N Bye',/stop\s*n\s*bye/i,1],
+  ['Shaver Auto Parts',/shaver\s*auto|viba\s*inc/i,1],['Executive Tint',/executive\s*t[i1l]nt/i,1],['LKQ',/\bLKQ\b|keystone\s*automotive/i,1],['Justin Tire Shop',/justin\s*tire/i,1],
   ['Express Oil',/express\s*oil/i],['Strickland Brothers',/strickland/i],['Mavis',/\bmavis\b/i],['Caliber Collision',/caliber/i],['Safelite',/safelite/i]
 ];
 var FUEL_BRANDS=/buc.?ee|\bshell\b|exxon|\bmobil\b|chevron|texaco|valero|quik\s*trip|murphy|circle\s*k|7.?eleven|speedway|sunoco|phillips\s*66|conoco|\bbp\b|marathon|citgo|\bgulf\b|race\s*trac|\bstripes\b|love'?s|flying\s*j|\bpilot\b/i;
 var NOT_MONEY=/deductible|limit|coverage|policy|odometer|mileage|phone|fax|tel\b|zip|account|acct|claim\s*(no|number|#)|member|routing|price\s*\/?\s*gal|\/\s*gal|@\s*\$?\d|gallons?\b/i;
-function lastAmount(lines,re,not){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var a=amountsIn(l);if(a.length)return a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)return nx[nx.length-1];
-    var pv=alone&&lines[i-1]&&lines[i-1].replace(/[^a-z]/gi,'').length<=3&&amountsIn(lines[i-1]);if(pv&&pv.length)return pv[pv.length-1];}}return null;}
+function lastAmount(lines,re,not,skipZero){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var v=null,a=amountsIn(l);if(a.length)v=a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;
+    if(v==null){var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)v=nx[nx.length-1];}
+    if(v==null){var pv=alone&&lines[i-1]&&lines[i-1].replace(/[^a-z]/gi,'').length<=3&&amountsIn(lines[i-1]);if(pv&&pv.length)v=pv[pv.length-1];}
+    if(v!=null&&!(skipZero&&v===0))return v;}}return null;}
 /* the figure you actually paid, best label first */
-var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid|base\s*a[mn](?:oun)?t|sale\s*amount|purchase\s*amount|total\s*charged|amount\s*charged/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
+var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*pa[i1]?d|total\s*paid|base\s*a[mn](?:oun)?t|sale\s*amount|purchase\s*amount|total\s*charged|amount\s*charged/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i,/^\W*t?otal?\s*[:=]?\s*\$\s*\d|\bamount\s*:?\s*\$\s*\d/i];
 var NOT_TOTAL=/sub\s*-?\s*total|total\s*(parts|labor|labour|tax|discount|savings|units|hours|items?|price|cost\s*each|qty|quantity)|(parts|labor|labour|tax|paint|materials?|sublet|items?)\s*total|total\s*(qty|quantity)/i;
 function findTotal(lines){
-  var first=null;for(var k=0;k<TOTAL_LABELS.length;k++){var v=lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL);if(v!=null&&v>=0){first=v;break;}}
+  var first=null,zero=null;for(var k=0;k<TOTAL_LABELS.length;k++){var v=lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL,true);if(v!=null&&v>0){first=v;break;}if(zero==null&&lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL)===0)zero=0;}
+  if(first==null)first=zero;   /* "amount due 0.00" after paying: the paid figure is printed elsewhere */
   if(first==null)return null;
   var votes={};lines.forEach(function(l){if(!TOTAL_LABELS.some(function(re){return re.test(l);})||NOT_TOTAL.test(l)||NOT_MONEY.test(l))return;
     var a=amountsIn(l);if(a.length){var v=a[a.length-1].toFixed(2);votes[v]=(votes[v]||0)+1;}});
   var top=Object.keys(votes).sort(function(a,b){return votes[b]-votes[a];})[0];
   var tot=(top&&votes[top]>=2&&votes[top]>(votes[first.toFixed(2)]||0))?parseFloat(top):first;
   var st=lastAmount(lines,/sub\s*-?\s*total/i),tx=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax|taxable/i);
-  if(st!=null){var sum=Math.round((st+(tx||0))*100)/100;if(Math.abs(sum-tot)>0.004&&Math.abs(sum-tot)<1)tot=sum;}
+  if(st!=null){var sum=Math.round((st+(tx||0))*100)/100;if(Math.abs(sum-tot)>0.004&&(Math.abs(sum-tot)<1||tot<st))tot=sum;}   /* a total below the subtotal is a misread */
   return tot;
 }
 /* dealer / shop invoices end with a summary box (PARTS, LABOR, SUBLET, FREIGHT, MISC, SALES TAX ... TOTAL). When the
@@ -410,7 +496,7 @@ function summaryTotal(lines){
 /* category = the one whose keywords appear most (one stray word like "tire pressure" in an options list can't win) */
 var CAT_WORDS={
   'Fuel':/\b(\d{1,3}\.\d{3}\s*G|gallons?|gal\b|unleaded|unl\b|diesel|gasoline|fuel\s*(sale|total|purchase)|pump\s*#?\s*\d+|price\s*\/?\s*gal|ppg|e-?10|mid.?grade|octane)\b/gi,
-  'Tires':/\b(new tires?|tire (install|mount|repair|rotation)|mount (and|&) balance|wheel balanc\w*|alignment|tyres?|\d{3}\/\d{2}r\d{2})\b/gi,
+  'Tires':/\b(tpms|tire\s*sensors?|new tires?|tire (install|mount|repair|rotation)|mount (and|&) balance|wheel balanc\w*|alignment|tyres?|\d{3}\/\d{2}r\d{2})\b/gi,
   'Maintenance':/\b(oil change|lube|oil filter|air filter|cabin filter|state inspection|inspection fee|wiper|maintenance|tune.?up|coolant|transmission fluid|brake fluid|synthetic|multi.?point)\b/gi,
   'Cleaning / Detail':/\b(car wash|wash|detail\w*|vacuum|shampoo|interior clean\w*|odor)\b/gi,
   'Registration / Title':/\b(registration|title|tag renewal|dmv|county tax|license fee|txdmv)\b/gi,
@@ -431,12 +517,13 @@ function findVendor(lines){
   var kv=KNOWN_VENDORS.slice().sort(function(a,b){return b[0].length-a[0].length;});
   var whole=lines.join('\n');if(/car\s*wash/i.test(whole))for(var kw=0;kw<kv.length;kw++)if(/Car Wash$/.test(kv[kw][0])&&kv[kw][1].test(whole))return kv[kw][0];
   for(var k=0;k<kv.length;k++)if(kv[k][1].test(top))return kv[k][0];
+  for(var ka=0;ka<kv.length;ka++)if(kv[ka][2]&&kv[ka][1].test(whole))return kv[ka][0];   /* local shops whose name can sit at the bottom of the page */
   for(var fi=0;fi<Math.min(4,lines.length);fi++){var fm=lines[fi].match(/\b(fuel|gas|food\s*mart|mart)\s*#\s*\d+/i);if(fm)return fm[0].replace(/\s*#\s*/,' #').replace(/\b[a-z]/g,function(c){return c.toUpperCase();}).replace(/\B[A-Z]+/g,function(x){return x.toLowerCase();});}
   var best=null;
   lines.slice(0,25).forEach(function(raw,i){var l=raw.replace(/\s{2,}/g,' ').trim();
     if(lines.slice(Math.max(0,i-3),i).some(function(pv){return /deliver\s*to|sold\s*to|bill\s*to|ship\s*to/i.test(pv);}))return;   /* the customer block is us, not the seller */
     if(l.length<4||l.length>60||NOT_VENDOR.test(l))return;
-    var lt=l.replace(/[^A-Za-z]/g,'');if(lt.length>=4&&(lt.match(/[HKXN]/g)||[]).length>=lt.length*.6)return;
+    var lt=l.replace(/[^A-Za-z]/g,'');if(lt.length>=4&&(lt.match(/[HKXNR]/g)||[]).length>=lt.length*.6)return;
     var letters=(l.match(/[a-z]/gi)||[]).length;if(letters<l.length*.55||letters<4)return;
     var words=l.split(/\s+/),real=words.filter(function(w){return /^[A-Za-z&'.,-]{3,}$/.test(w);});
     if(!(real.length>=2||(real.length===1&&real[0].replace(/[^a-z]/gi,'').length>=5))||real.length<words.length*.5)return;   /* scanning junk like "Ee ema a" */
@@ -449,18 +536,22 @@ function findVendor(lines){
 }
 var INV_LABELS=[
   /\b(?:invoice|inv)\s*(?:no\.?|number|num|#)\s*[:#.+]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i,
-  /\b(?:invoice|inv)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i,
+  /\b(?:invoice|inv)\s*[:#.\-]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/i,
   /\b(?:receipt|rcpt|ticket|tkt)\s*(?:no\.?|number|num|#)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
   /\b(?:receipt|rcpt)\s*[:#.]\s*([A-Za-z0-9]{4,12})\b/i,
   /\b(?:trans(?:action)?|trx|tran|txn)\s*(?:id|no\.?|number|num|#)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{3,})/i,
   /\b(?:repair\s*order|work\s*order|r\.?o\.?|w\.?o\.?|order)\s*(?:no\.?|number|#)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
+  /\bpayment\s*id\s*[:#]?\s*([A-Z0-9]{8,20})\b/i,
   /\b(?:ref(?:erence)?|seq(?:uence)?|estimate\s*id)\s*(?:no\.?|number|#|id)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{3,})/i
 ];
 var INV_ASKED=/inv\w{0,4}\s*n\w?mb|invoice\s*(no\b|#)/i;
 function findInvoiceNo(lines){
   var all=lines.join('\n');
   if(/auto\s*zone/i.test(all)){var bz=all.match(/\b(0\d{10})(\d{6})C\b/);if(bz)return bz[1];}
-  var got=findInvoiceLabeled(lines);if(got)return got;
+  for(var pi=0;pi<lines.length;pi++){var pm=lines[pi].match(/^\W{0,3}invoice\s+([0-9A-Za-z@°]{5,8})\W*$/i);if(!pm)continue;
+    var pv=pm[1].replace(/°/g,'').replace(/[oOQDp@]/g,'0').replace(/[Il|]/g,'1').replace(/S/g,'5').replace(/[BE]/g,'8').replace(/g/g,'9').replace(/Z/g,'2');
+    if(/^\d{5,7}$/.test(pv))return pv;}
+  var got=findInvoiceLabeled(lines);if(got&&!(got.replace(/\D/g,'').length>=6&&(got.match(/0/g)||[]).length>=got.replace(/\D/g,'').length-2))return got;
   for(var q=0;q<Math.min(lines.length,12);q++){var lt=lines[q].trim();
     if(/^[A-Z]{1,2}\d{5,9}$/.test(lt))return lt;}
   return '';
@@ -476,7 +567,7 @@ function findInvoiceLabeled(lines){
     for(var i=0;i<lines.length;i++){var l=lines[i];
       if(/auth|approval|card|acct|account|visa|master|amex|discover|debit|phone|tel\b|fax|store\s*#|pump|terminal|merchant|mid\b|tid\b/i.test(l)&&!/invoice|receipt|trans/i.test(l))continue;
       var m=l.match(INV_LABELS[k]);
-      if(m&&!/^\d{3}[.\-]\d{3}[.\-]\d{4}/.test(l.slice(m.index+m[0].length-m[1].length))&&(/\d/.test(m[1])||/receipt|rcpt/i.test(l)&&/^[A-Za-z0-9]{4,12}$/.test(m[1])&&!/^(date|time|total|copy|paid|sale)$/i.test(m[1]))&&!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(m[1])&&!/\*{2,}|x{3,}/i.test(l))return m[1].replace(/[.:]+$/,'').replace(/^[BODQ](?=\d{4,}$)/,'0');
+      if(m&&!/^\d{3}[.\-]\d{3}[.\-]\d{4}/.test(l.slice(m.index+m[0].length-m[1].length))&&(/\d/.test(m[1])||/receipt|rcpt/i.test(l)&&/^[A-Za-z0-9]{4,12}$/.test(m[1])&&!/^(date|time|total|copy|paid|sale)$/i.test(m[1]))&&!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(m[1])&&!/\*{2,}|x{3,}/i.test(l))return m[1].replace(/[.:]+$/,'').replace(/^[BODQ](?=\d{6,}$)/,'0');
     }
   }
   return '';
@@ -489,7 +580,7 @@ function findOdometer(lines){
 }
 /* ---------- a one-line summary of what was bought, for Notes ---------- */
 var SERVICE_WORDS=/\b(alignment|oil change|lube|inspection|state inspection|rotation|balance|brake|tune.?up|diagnos\w*|detail|wash|tow(ing)?|key|fob|remote|rekey|lockout|battery|tire|repair|replace\w*|install\w*|labor|service)\b/i;
-var NOT_SUMMARY=/warrant|policy|refund|return|exchange|damage|cardholder|acknowledg|agreement|signature|thank|appreciate|customer copy|merchant|terminal|approval|approved|auth|visa|mastercard|amex|discover|debit|credit|chip|\btip\b|change due|cash|balance|subtotal|sales tax|base\s*am|www\.|http|phone|tel\b|fax|address|street|\bave\b|\bst\b|\bblvd\b|houston|\btx\b|invoice|receipt|date|time|page \d|copy|store|cashier|register|trans|batch|ref\b|resp|aid\b|tvr|tsi|sold to|ship to|bill to|account/i;
+var NOT_SUMMARY=/payment|status|instruction|warrant|policy|refund|return|exchange|damage|cardholder|acknowledg|agreement|signature|thank|appreciate|customer copy|merchant|terminal|approval|approved|auth|visa|mastercard|amex|discover|debit|credit|chip|\btip\b|change due|cash|balance|subtotal|sales tax|base\s*am|www\.|http|phone|tel\b|fax|address|street|\bave\b|\bst\b|\bblvd\b|houston|\btx\b|invoice|receipt|date|time|page \d|copy|store|cashier|register|trans|batch|ref\b|resp|aid\b|tvr|tsi|sold to|ship to|bill to|account/i;
 function cleanItem(d){
   var part='';
   d=d.replace(/\b([A-Z0-9]{2,6}[*\-][A-Z0-9]{2,8}[*\-][A-Z0-9]{1,6})\b/,function(m){part=m.replace(/\*/g,'-');return ' ';});  /* Ford-style part numbers */
@@ -500,16 +591,21 @@ function cleanItem(d){
 function summarize(lines,items,category,vendor){
   var flat=lines.join('\n'),bits=[],vend=String(vendor||'').toLowerCase();
   if(category==='Fuel'){
-    var gal=((flat.match(/\b(?:regular|unleaded|premium|plus|super|diesel|unl|reg|mid\w*)\s+(\d{1,3}\.\s?\d{3})[G6]?\b/i)||[])[1]||'').replace(/\s/g,'')||(flat.match(/(\d{1,3}\.\d{2,3})\s*(?:gal|gallons?|G)\b/i)||flat.match(/gallons?\s*[:#]?\s*(\d{1,3}\.\d{2,3})/i)||[])[1];
-    var ppg=(flat.match(/(?:price\s*\/?\s*gal|ppg|@)\s*\$?\s*(\d\.\d{2,3})/i)||[])[1];
-    var grade=(flat.match(/\b(unleaded plus|unleaded|super|premium|plus|mid.?grade|regular|diesel|unl|reg)\b/i)||[])[1];
+    var gal=((flat.match(GAL_RE)||[])[1]||'').replace(/\s/g,'')||(flat.match(/(\d{1,3}\.\d{2,3})\s*(?:gal|gallons?|G)\b/i)||flat.match(/gallons?\s*[:#]?\s*(\d{1,3}\.\d{2,3})/i)||[])[1];
+    var ppg=(flat.match(/(?:price\s*\/?\s*gal|ppg|[@€])\D{0,4}(\d\.\d{2,3})/i)||[])[1];
+    var grade=(flat.match(/\b(unleaded plus|unleaded|super|premium|plus|mid.?grade|regular|diesel|unl|reg)\b/i)||flat.match(/\b\w{0,3}(ular)\b/i)||[])[1];if(/^ular$/i.test(grade||''))grade='Regular';
+    if(!gal)return '';
     if(gal)return gal+' gal'+(grade?' '+grade.replace(/^unl$/i,'Unleaded').replace(/^reg$/i,'Regular').replace(/\b[a-z]/,function(c){return c.toUpperCase();}):'')+(ppg?' @ $'+ppg+'/gal':'');
   }
   /* priced lines first */
-  var tot=findTotal(lines),its=items.filter(function(it){return !(items.length>1&&tot!=null&&Math.abs(it.amount-tot)<0.005);});
+  var tot=findTotal(lines),others=items.filter(function(it){return it.amount&&!(tot!=null&&Math.abs(it.amount-tot)<0.005);}).length,
+    its=items.filter(function(it){return !(others&&tot!=null&&Math.abs(it.amount-tot)<0.005);});   /* a line that equals the total is the total, unless it's the only priced line */
   its.forEach(function(it){if(NOT_SUMMARY.test(it.desc))return;var nx=String(it.next||'').trim().replace(/(\s+\S{1,2})+$/,'');
     if(nx&&nx.length>=3&&nx.length<=30&&!amountsIn(nx).length&&!/\d{3,}|total|tax|visa|master|debit|credit|card|cash|change|sku/i.test(nx)&&!NOT_SUMMARY.test(nx)&&(nx.match(/[a-z]/gi)||[]).length>=nx.length*.7)it={desc:it.desc.replace(/\s+x\s*$/i,' x1')+', '+nx,amount:it.amount,part:it.part};
-    var c=cleanItem(it.desc)+(it.part&&cleanItem(it.desc).indexOf('(part')<0?' (part '+it.part+')':'');if(/[A-Za-z]{3,}/.test(c))bits.push(c+' $'+it.amount.toFixed(2));});
+    /* a line of codes only ("ALI 591134 TQ12"): the name is on a following line ("TPMS SENS SNAP") */
+    if(!/[A-Za-z]{4,}/.test(it.desc)&&/\d{3,}/.test(it.desc)){var nm=(it.after||[]).filter(function(x){return !amountsIn(x).length&&!NOT_SUMMARY.test(x)&&(x.match(/\b[A-Za-z]{4,}\b/g)||[]).length>=2;})[0];if(nm)it={desc:nm,amount:it.amount,part:it.part};}
+    if(!it.amount&&/^\W*labou?r\b/i.test(it.desc))return;
+    var c=cleanItem(it.desc)+(it.part&&cleanItem(it.desc).indexOf('(part')<0?' (part '+it.part+')':'');if(/[A-Za-z]{3,}/.test(c))bits.push(c+(it.amount?' $'+it.amount.toFixed(2):''));});
   /* then service titles printed without a price (e.g. "ExpressAlign Total Alignment") */
   if(!bits.length)lines.forEach(function(l){var t=l.replace(/[|\\\[\]{}_]+/g,' ').replace(/\s{2,}/g,' ').trim().replace(/^.*?\b\d{5}(?:-\d{4})?\b[\s,]*/,'');   /* address and service printed on one line: keep what follows the ZIP */
     if(t.length<6||t.length>60||!SERVICE_WORDS.test(t)||NOT_SUMMARY.test(t)||amountsIn(t).length||(vend&&t.toLowerCase().indexOf(vend.slice(0,12))>=0))return;
@@ -524,50 +620,65 @@ function findWashMembership(text,r){
   if(!washy||!/unlimited\s*wash|wash\s*club|\bUWC\b|membership|member\s*sign|sign\s*-?\s*up|unlimited\s*plan|monthly\s*plan|wash\s*pass/i.test(text))return null;
   var pl=text.match(/plate\s*[:.]?\s*(\d{4,16})([^\n]*)\n?([^\n]*)/i),mem0='';
   if(pl){mem0=pl[1];if(mem0.length<12){var more=((pl[2]+' '+pl[3]).match(/(\d{3,12})\s*$/m)||(pl[3].match(/(\d{3,12})/))||[])[1]||'';if((mem0+more).length===12)mem0+=more;}}
-  var mem=mem0||(text.match(/barcode\s*(?:number)?\s*(?:is)?\s*:?\s*(\d{8,16})/i)||text.match(/member(?:ship)?\s*(?:#|no\.?|number|id)\s*:?\s*([A-Z0-9\-]{5,20})/i)||[])[1]||'';
+  var mem=mem0||(text.match(/barcode[\s\S]{0,40}?(\d{10,16})/i)||text.match(/member(?:ship)?\s*(?:#|no\.?|number|id)\s*:?\s*([A-Z0-9\-]{5,20})/i)||[])[1]||'';
   var bd=(text.match(/on\s*the\s*(\d{1,2})(?:st|nd|rd|th)?\b[\s\S]{0,25}?(?:of\s*each|every)\s*month/i)||[])[1]||'';
-  return {member_no:mem,billing_day:bd,plan:((r.items[0]&&r.items[0].desc)||'').replace(/[\s:]+$/,'')};
+  return {member_no:mem,billing_day:bd,amount:r.items[0]&&/sign\s*-?\s*up|wash|club|plan|member/i.test(r.items[0].desc)?r.items[0].amount:null,plan:((r.items[0]&&r.items[0].desc)||'').replace(/[\s:]+$/,'')};
 }
+/* gallons on a pump receipt: "REGULAR 10.503G", "UNLEAD REG 13.503G", "Regular CR #03 16.060G" (the G often reads as 6, 0 or 9) */
+var GAL_RE=/\b(?:\w{0,2}egular|ular|unleaded|unlead|premium|plus|super|diesel|unl|reg|mid\w*)\b[^\n\d]{0,10}?(?:#\s*\d{1,2}\s+)?(\d{1,3}\s?\.\s?\d{3})[G0-9]?(?!\d)/i;
 function fixFuel(lines){
   var flat=lines.join('\n');
-  var gm=flat.match(/\b(?:regular|unleaded|premium|plus|super|diesel|unl|reg|mid\w*)\s+(\d{1,3}\.\s?\d{3})[G6]?\b/i),pm=flat.match(/price\s*\/?\s*gal\D{0,6}(\d\.\d{3})/i);
-  if(!gm||!pm)return;
-  var tv={};lines.forEach(function(l){if(/total/i.test(l)&&!/sub/i.test(l)){var a=l.match(/(\d{1,4}\.\d{2})(?!\d)/g);if(a){var t=a[a.length-1];tv[t]=(tv[t]||0)+1;}}});
-  var ts=Object.keys(tv).sort(function(a,b){return tv[b]-tv[a];})[0];if(!ts)return;
-  var graw=gm[1],g=graw.replace(/\s/g,''),pr=pm[1];if(Math.abs(Math.round(+g*+pr*100)/100-(+ts))<=0.011)return;
+  var gm=flat.match(GAL_RE),pm=flat.match(/(?:pric\w*\s*\/?\s*\S{0,5}?\D{0,4}|[@€©]\s*\$?\s*)(\d[.,]\d{3})/i);
+  var fuely=!!(gm||pm||/fuel\s*total|price\s*\/?\s*gal/i.test(flat));
+  if(!gm||!pm)return fuely?'bad':null;
+  /* the total as printed on the TOTAL / CREDIT lines (a subtotal counts half): each reading is a candidate */
+  var tv={};lines.forEach(function(l){if(/total|credit|debit|amount/i.test(l)){var a=l.match(/(\d{1,4}[.,]\d{2})(?!\d)/g);if(a){var t=a[a.length-1].replace(',','.');tv[t]=(tv[t]||0)+(/sub/i.test(l)?0.5:1);}}});
+  var cands=Object.keys(tv);if(!cands.length)return 'bad';
+  var maxv=Math.max.apply(null,cands.map(function(t){return tv[t];}));
+  var graw=gm[1],g=graw.replace(/\s/g,''),praw=pm[1],pr=praw.replace(',','.'),est=Math.round(+g*+pr*100)/100;
+  var off=function(a,b){if(a.length!==b.length)return 99;var c=0;for(var i=0;i<a.length;i++)if(a[i]!==b[i]){if(CONF.indexOf(a[i])<0||CONF.indexOf(b[i])<0)return 99;c++;}return c;};
   var best=null,tie=false,tieT=false;
-  digitVariants(g,3).forEach(function(gv){if(+gv.s<0.5||+gv.s>40)return;digitVariants(pr,2).forEach(function(pv){if(+pv.s<1.5||+pv.s>7)return;
-    var r=(Math.round(+gv.s*+pv.s*100)/100).toFixed(2);if(r.length!==ts.length)return;var c=0;
-    for(var i=0;i<r.length;i++)if(r[i]!==ts[i]){if(CONF.indexOf(r[i])<0||CONF.indexOf(ts[i])<0){c=99;break;}c++;}
-    if(c>3)return;var cost=(gv.w||0)+(pv.w||0)+c;
-    if(!best||cost<best.cost-1e-9){best={g:gv.s,p:pv.s,t:r,cost:cost};tie=false;tieT=false;}else if(Math.abs(cost-best.cost)<1e-9){if(best.g!==gv.s||best.p!==pv.s)tie=true;if(best.t!==r)tieT=true;}});});
-  if(!best||tieT)return;
+  cands.forEach(function(ts){var miss=maxv-tv[ts];
+    digitVariants(g,3).forEach(function(gv){if(+gv.s<0.5||+gv.s>40)return;digitVariants(pr,2).forEach(function(pv){if(+pv.s<1.5||+pv.s>7)return;
+      var r=(Math.round(+gv.s*+pv.s*100)/100).toFixed(2),c=off(r,ts);if(c>3)return;var cost=(gv.w||0)+(pv.w||0)+c+miss;
+      if(!best||cost<best.cost-1e-9){best={g:gv.s,p:pv.s,t:r,cost:cost};tie=false;tieT=false;}else if(Math.abs(cost-best.cost)<1e-9){if(best.g!==gv.s||best.p!==pv.s)tie=true;if(best.t!==r)tieT=true;}});});});
+  if(best&&tieT)return 'bad';
+  if(!best){   /* no exact fit: a printed total within 1.5% of gallons x price (a digit of the price misread) */
+    var near=cands.filter(function(t){return Math.abs(+t-est)<=est*.015;}).sort(function(x,y){return Math.abs(+x-est)-Math.abs(+y-est);})[0];
+    if(!near)return 'bad';best={g:g,p:pr,t:near};}
   if(tie){best.g=g;best.p=pr;}   /* every best reading agrees on the total: fix the total, keep gallons and price as read */
-  var esc=function(x){return x.replace('.','\\.');};
-  for(var i=0;i<lines.length;i++)lines[i]=lines[i].replace(new RegExp('(^|[^\\d])'+graw.replace('.','\\.')+'[G6]?(?!\\d)'),'$1'+best.g+'G').replace(new RegExp('(^|[^\\d])'+esc(pr)+'(?!\\d)'),'$1'+best.p).replace(new RegExp('(^|[^\\d])'+esc(ts)+'(?!\\d)','g'),'$1'+best.t);
+  var esc=function(x){return x.replace('.','[.,]');};
+  for(var i=0;i<lines.length;i++){lines[i]=lines[i].replace(new RegExp('(^|[^\\d])'+graw.replace(/[.\s]/g,'\\s?\\.?\\s?')+'[G0-9]?(?!\\d)'),'$1'+best.g+'G').replace(new RegExp('(^|[^\\d])'+esc(praw)+'(?!\\d)'),'$1'+best.p);
+    if(/total|credit|debit|amount/i.test(lines[i]))cands.forEach(function(t){if(t!==best.t&&off(t,best.t)<=3)lines[i]=lines[i].replace(new RegExp('(^|[^\\d])'+esc(t)+'(?!\\d)','g'),'$1'+best.t);});}
+  return 'ok';
 }
 function parse(text){
-  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean);fixFuel(lines);var flat=lines.join('\n');text=flat;
+  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean);var fuelSt=fixFuel(lines);var flat=lines.join('\n');text=flat;
   var total=findTotal(lines);if(total==null)total=summaryTotal(lines);
   var subtotal=lastAmount(lines,/sub\s*-?\s*total/i);
   var tax=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax/i);
   var all=[];lines.forEach(function(l){if(!NOT_MONEY.test(l))all=all.concat(amountsIn(l));});
   /* no labelled total: on a short receipt the biggest amount is the total; on a long document it's a guess, so leave it for you */
+  if(total==null&&subtotal!=null&&tax!=null)total=Math.round((subtotal+tax)*100)/100;
   if(total==null&&all.length&&lines.length<=40)total=Math.max.apply(null,all);
+  /* a card-machine RETURN slip (RETURN printed next to the MID / TID / REF# / APPR CODE lines): the money came back */
+  var refund=lines.some(function(l,li){return /\bRETURN\b/.test(l)&&l.replace(/RETURN/,'').replace(/[^A-Za-z]/g,'').length<=6&&
+    /\b(MID|TID|DID|REF#|RRN|APPR|BATCH)\b/.test(lines.slice(Math.max(0,li-4),li+5).join(' '));});
+  if(refund&&total>0)total=-total;
   var inv=findInvoiceNo(lines);
   var odo=findOdometer(lines);
   var items=[];lines.forEach(function(l,li){
-    if(/invoic|\.py\b|savings|you saved|discount|total|tax|balance|amount due|change due|your change|^\W*change\b|\bchange\s*:|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal|base\s*a[mn](oun)?t|\bresp\b|approval|ref\s*#|sale\s*amount|purchase\s*amount/i.test(l)||NOT_MONEY.test(l)||SUMMARY_LINE.test(l)||/°|º|\bdeg\b|camber|caster|\btoe\b|thrust/i.test(l))return;
+    if(/invoic|\.py\b|savings|you saved|discount|total|tax|balance|amount due|change due|your change|^\W*change\b|\bchange\s*:|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal|base\s*a[mn](oun)?t|\bresp\b|approval|ref\s*#|sale\s*amount|purchase\s*amount|amount\s*pa|\btora\b|shipping|handling/i.test(l)||NOT_MONEY.test(l)||SUMMARY_LINE.test(l)||/°|º|\bdeg\b|camber|caster|\btoe\b|thrust|max\s*tire|axle\s*typ|bolt\s*pattern|inflation|torque/i.test(l))return;
     var a=amountsIn(l);if(!a.length)return;var cut=l.search(/(?:\$\s?)?-?\d{1,3}(?:,\d{3})*[.,]\d{2}(?!\d)/);var desc=(cut>0?l.slice(0,cut):l).replace(/(?:\$\s?)?-?\d{1,3}(?:[,\s]\d{3})*[.,]\d{2}/g,'').replace(/\bSKU[-\s]?\S*/gi,' ').replace(/[|\[\]{}\\_]+/g,' ').replace(/\s+-\s*$/,'').replace(/\s{2,}/g,' ').trim();
     var part=((cut>0?l.slice(0,cut):l).match(/\b[A-Z0-9]{2,6}[*\-][A-Z0-9]{2,8}[*\-][A-Z0-9]{1,6}\b/)||[])[0]||'';
     desc=desc.split(/\s+/);var pj=-1;for(var q=0;q<Math.min(5,desc.length);q++)if(/^\d{1,3}$/.test(desc[q])||/^(?=.*\d)[A-Z0-9*\-]{5,}$/.test(desc[q]))pj=q;
     if(pj>=0&&desc.slice(pj+1).filter(function(w){return /^[A-Za-z]{3,}$/.test(w);}).length>=2)desc=desc.slice(pj+1);
     while(desc.length&&!/^[A-Za-z][A-Za-z'&-]{2,}$/.test(desc[0]))desc.shift();while(desc.length&&/^[^A-Za-z]*\d[^A-Za-z]*$|^[|\]\[]+$/.test(desc[desc.length-1]))desc.pop();desc=desc.join(' ');
-    if(!/[A-Za-z]{3,}/.test(desc))return;items.push({desc:desc.slice(0,90),amount:a[a.length-1],part:part.replace(/\*/g,'-'),next:lines[li+1]||''});});
+    if(!/[A-Za-z]{3,}/.test(desc))return;items.push({desc:desc.slice(0,90),amount:a[a.length-1],part:part.replace(/\*/g,'-'),next:lines[li+1]||'',after:lines.slice(li+1,li+4)});});
   /* car: a VIN or plate printed on the invoice */
   var up=flat.toUpperCase(),car=null,how='';
   CARS.forEach(function(c){if(car)return;if(c.vin&&c.vin.length===17&&(up.indexOf(c.vin)>=0||up.replace(/O/g,'0').indexOf(c.vin.replace(/O/g,'0'))>=0)){car=c;how='VIN';}});
-  if(!car)CARS.forEach(function(c){if(car)return;var p=c.plate,re=new RegExp('\\b'+p.slice(0,3)+'[\\s\\-]?'+p.slice(3)+'\\b');if(re.test(up)){car=c;how='plate';}});
+  if(!car)CARS.forEach(function(c){if(car)return;var p=c.plate,re=new RegExp('\\b'+p.slice(0,3)+'[\\s\\-]?'+p.slice(3)+'\\b');if(re.test(up)){car=c;how=/PLATE IN PHOTO/.test(up)&&new RegExp('PLATE IN PHOTO '+p).test(up)?'photo':'plate';}});
   if(!car)CARS.forEach(function(c){if(car||!c.vin)return;var tail=c.vin.slice(-6);if(new RegExp('VIN[^\\n]{0,25}'+tail).test(up)){car=c;how='VIN ending '+tail;}});
   /* a VIN with one or two characters misread */
   if(!car){var toks=up.replace(/[^A-Z0-9\n ]/g,' ').match(/[A-Z0-9]{16,18}/g)||[];
@@ -590,9 +701,14 @@ function parse(text){
   var makeHint='';
   if(!car){var makes={};CARS.forEach(function(c){var m=String(c.name).replace(/^\d{4}\s+/,'').split(' ')[0];if(m)makes[m.toLowerCase()]=m;});
     Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
-  var res={makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:summarize(lines,items,guessCategory(flat),findVendor(lines))};
+  var res={makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:(refund?'Return (refund). ':'')+summarize(lines,items,guessCategory(flat),findVendor(lines)),refund:refund};
   if(/^(AutoZone|O'Reilly Auto Parts|Advance Auto Parts|NAPA)$/.test(res.vendor)&&res.category!=='Fuel')res.category='Parts';
   if(/car\s*wash/i.test(res.vendor||''))res.category='Cleaning / Detail';
+  if(/^(LKQ|Shaver Auto Parts)$/.test(res.vendor))res.category='Parts';
+  if(res.category!=='Fuel'&&/fuel|^(Stop N Bye|Texaco)$/i.test(res.vendor||'')&&/\bgal|pump|fuel\s*total|regular|unlead|\d\.\d{3}\s*G\b/i.test(flat))res.category='Fuel';
+  if(/\btires?\b/i.test(res.vendor||'')&&res.category!=='Fuel')res.category='Tires';
+  if(res.vendor==='Executive Tint')res.category='Other';
+  res.fuelOk=res.category==='Fuel'?fuelSt==='ok':null;   /* false: gallons x price didn't come out to the total */
   res.wash=findWashMembership(text,res);
   return res;
 }
@@ -649,29 +765,14 @@ function newInvoice(files){
 function setStatus(o,txt,cls){var s=document.querySelector('#'+o.id+' [data-st]');s.textContent=txt;s.className='status'+(cls?' '+cls:'');}
 function carFor(plate){plate=String(plate||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return CARS.filter(function(c){return c.plate===plate;})[0]||null;}
 function showCar(o){var el=document.getElementById(o.id),p=el.querySelector('[data-f=plate]').value,c=carFor(p),n=el.querySelector('[data-carname]');
-  n.textContent=c?(o.carHow&&p===o.autoPlate?'Found by '+o.carHow+' on the invoice':o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice mentions '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
+  n.textContent=c?(o.carHow&&p===o.autoPlate?(o.carHow==='photo'?'Found by the licence plate in the photo':'Found by '+o.carHow+' on the invoice'):o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice mentions '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
 function addPages(o,files){
   var el=document.getElementById(o.id);o.state='reading';setStatus(o,'Reading…');el.querySelector('.bar').classList.remove('hidden');
   var list=[].slice.call(files);
   list.reduce(function(p,f){return p.then(function(){return (f instanceof Blob?fileToImg(f):Promise.resolve(f)).then(function(img){
       o.imgs.push(img);var t=document.createElement('img');t.src=img.src||(img.toDataURL?img.toDataURL('image/jpeg',.7):'');t.alt='Page '+o.imgs.length;el.querySelector('.thumbs').appendChild(t);
-      var bar=function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';},crop=cropPaper(img);
-      /* read in stages and stop as soon as vendor, date and total are all found: the cropped receipt, the crop with
-         shadows evened out, the whole photo with shadows evened out, then the whole photo as is. Keep the best. */
-      var tries=(crop?[function(){return forOcr(crop);},function(){return forOcrEven(crop);}]:[]).concat([function(){return forOcrEven(img);},function(){return forOcr(img);}]);
-      if(!crop)tries=[function(){return forOcr(img);},function(){return forOcrEven(img);}];
-      var best=null,carSeen=null,invSeen='';
-      return tries.reduce(function(pp,mk,ix){return pp.then(function(done){if(done)return true;
-          setStatus(o,ix?'Reading… (trying a clearer version)':'Reading…');
-          return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(r.invoice_no&&!invSeen)invSeen=r.invoice_no;
-            if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor&&(!!invSeen||!INV_ASKED.test(t));});});},Promise.resolve(false))
-        .then(function(){
-          /* mostly junk: the paper may be upside down, so try it turned around */
-          if(best&&best.sc>=14){var rb=parse(best.t);if(rb.total!=null||rb.date)return;}
-          var base=crop||img,rot=rotate180(base);setStatus(o,'Reading… (turning it the right way up)');
-          return [function(){return forOcr(rot);},function(){return forOcrEven(rot);}].reduce(function(pp,mk){return pp.then(function(done){if(done)return true;
-            return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(r.invoice_no&&!invSeen)invSeen=r.invoice_no;if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor&&(!!invSeen||!INV_ASKED.test(t));});});},Promise.resolve(false));})
-        .then(function(){var t=best?best.t:'';if(carSeen&&!parse(t).car)t+='\n'+carSeen.vin;if(invSeen&&!parse(t).invoice_no)t+='\nInvoice Number: '+invSeen;o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
+      var bar=function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';};
+      return readImage(img,function(m){setStatus(o,m);},bar).then(function(t){o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
   .then(function(){fill(o);})
   .catch(function(e){setStatus(o,e.message||'Could not read the photo','err');fill(o);});
 }
@@ -692,7 +793,7 @@ function fill(o){
   o.items=r.items;
   if(r.wash&&!o.washSeen){o.washSeen=true;var wb=el.querySelector('[data-wash]');wb.classList.remove('hidden');el.querySelector('[data-washon]').checked=true;
     var wv=function(k,v){var i=el.querySelector('[data-w='+k+']');if(v&&!i.value)i.value=v;};
-    wv('member_no',r.wash.member_no);wv('billing_day',r.wash.billing_day||(r.date?String(+r.date.slice(8,10)):''));wv('monthly_amount',r.total!=null?r.total.toFixed(2):'');}
+    wv('member_no',r.wash.member_no);wv('billing_day',r.wash.billing_day||(r.date?String(+r.date.slice(8,10)):''));wv('monthly_amount',r.wash.amount?r.wash.amount.toFixed(2):r.total!=null?r.total.toFixed(2):'');}
   else if(!r.wash&&!o.washSeen&&(r.category==='Cleaning / Detail'||/car\s*wash/i.test(r.vendor||''))){el.querySelector('[data-wash]').classList.remove('hidden');el.querySelector('[data-washbody]').classList.add('hidden');}
   el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+it.amount.toFixed(2)+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
   el.querySelector('[data-itemswrap]').open=false;
@@ -700,7 +801,7 @@ function fill(o){
   el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
   var miss=[];if(r.total==null)miss.push('total');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
   if(o.washSeen&&!o.sticker)miss.push('sticker photo');
-  o.state='ready';setStatus(o,miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save',miss.length?'warn':'');
+  o.state='ready';setStatus(o,(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
   showCar(o);
 }
 function collect(o){
