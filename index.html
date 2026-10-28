@@ -33,6 +33,12 @@ input,select,textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);ba
 input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:0;border-color:transparent}
 textarea{min-height:60px;resize:vertical}
 .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.wash{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--tint)}
+.wash .chk{display:flex;align-items:center;gap:8px;margin:0;font-size:14px;color:var(--ink)}
+.wash .chk input{width:20px;height:20px;flex:none}
+.wash .hint{font-size:12.5px;color:var(--ink2);margin:8px 0}
+.wrow{display:flex;align-items:center;gap:10px}
+.wrow img{width:84px;height:64px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in}
 .row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .inv-top{display:flex;gap:12px;align-items:flex-start}
 .thumbs{display:flex;gap:6px;flex:none}
@@ -489,6 +495,14 @@ function summarize(lines,items,category,vendor){
   var more=bits.length>4?' +'+(bits.length-4)+' more':'';
   return bits.slice(0,4).join('; ')+more;
 }
+/* a car-wash membership signup (one membership per car): the page then asks for a photo of the windshield sticker */
+function findWashMembership(text,r){
+  var washy=r.category==='Cleaning / Detail'||/car\s*wash/i.test(r.vendor||'');
+  if(!washy||!/unlimited\s*wash|wash\s*club|\bUWC\b|membership|member\s*sign|unlimited\s*plan|monthly\s*plan|wash\s*pass/i.test(text))return null;
+  var mem=(text.match(/barcode\s*(?:number)?\s*(?:is)?\s*:?\s*(\d{8,16})/i)||text.match(/member(?:ship)?\s*(?:#|no\.?|number|id)\s*:?\s*([A-Z0-9\-]{5,20})/i)||[])[1]||'';
+  var bd=(text.match(/on\s*the\s*(\d{1,2})(?:st|nd|rd|th)?\b[\s\S]{0,25}?(?:of\s*each|every)\s*month/i)||[])[1]||'';
+  return {member_no:mem,billing_day:bd,plan:((r.items[0]&&r.items[0].desc)||'').replace(/[\s:]+$/,'')};
+}
 function parse(text){
   var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean),flat=lines.join('\n');
   var total=findTotal(lines);if(total==null)total=summaryTotal(lines);
@@ -528,6 +542,7 @@ function parse(text){
     Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
   var res={makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:summarize(lines,items,guessCategory(flat),findVendor(lines))};
   if(/^(AutoZone|O'Reilly Auto Parts|Advance Auto Parts|NAPA)$/.test(res.vendor)&&res.category!=='Fuel')res.category='Parts';
+  res.wash=findWashMembership(text,res);
   return res;
 }
 
@@ -568,6 +583,11 @@ function newInvoice(files){
       '<label>Vendor</label><input data-f="vendor" placeholder="Shop or store name">'+
       '<div class="row2"><div><label>Category</label><select data-f="category">'+CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div><div><label>Invoice #</label><input data-f="invoice_no"></div></div>'+
       '<div class="row3"><div><label>Subtotal</label><input data-f="subtotal" inputmode="decimal"></div><div><label>Tax</label><input data-f="tax" inputmode="decimal"></div><div><label>Odometer</label><input data-f="odometer" inputmode="numeric"></div></div>'+
+      '<div class="wash hidden" data-wash><label class="chk"><input type="checkbox" data-washon> Car wash membership for this car</label>'+
+        '<div data-washbody><p class="hint">Take a photo of the membership sticker on the windshield so we know which car has which sticker. You need it to manage or cancel the membership.</p>'+
+        '<div class="wrow"><label class="btn ghost" style="margin:0">📷 Sticker photo<input type="file" accept="image/*" capture="environment" data-sticker class="hidden"></label><img data-stickerimg class="hidden" alt="Sticker photo"></div>'+
+        '<div class="row2"><div><label>Sticker number</label><input data-w="sticker_no" autocomplete="off" placeholder="Printed on the sticker"></div><div><label>Member / barcode #</label><input data-w="member_no" autocomplete="off"></div></div>'+
+        '<div class="row2"><div><label>Monthly price</label><input data-w="monthly_amount" inputmode="decimal"></div><div><label>Billing day</label><input data-w="billing_day" inputmode="numeric" placeholder="1 to 31"></div></div></div></div>'+
       '<label>Notes</label><textarea data-f="note" placeholder="Optional"></textarea>'+
       '<details data-itemswrap><summary>Line items</summary><table class="items" data-items></table></details>'+
       '<details><summary>Text read from the photo</summary><pre data-text></pre></details>'+
@@ -619,11 +639,16 @@ function fill(o){
   if(r.total!=null)f('total').value=r.total.toFixed(2);if(r.subtotal!=null)f('subtotal').value=r.subtotal.toFixed(2);if(r.tax!=null)f('tax').value=r.tax.toFixed(2);
   if(o.imgs.length===1||f('category').value==='Other')f('category').value=r.category;
   o.items=r.items;
+  if(r.wash&&!o.washSeen){o.washSeen=true;var wb=el.querySelector('[data-wash]');wb.classList.remove('hidden');el.querySelector('[data-washon]').checked=true;
+    var wv=function(k,v){var i=el.querySelector('[data-w='+k+']');if(v&&!i.value)i.value=v;};
+    wv('member_no',r.wash.member_no);wv('billing_day',r.wash.billing_day||(r.date?String(+r.date.slice(8,10)):''));wv('monthly_amount',r.total!=null?r.total.toFixed(2):'');}
+  else if(!r.wash&&!o.washSeen&&(r.category==='Cleaning / Detail'||/car\s*wash/i.test(r.vendor||''))){el.querySelector('[data-wash]').classList.remove('hidden');el.querySelector('[data-washbody]').classList.add('hidden');}
   el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+it.amount.toFixed(2)+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
   el.querySelector('[data-itemswrap]').open=false;
   el.querySelector('[data-text]').textContent=o.text||'(no text found)';
   el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
   var miss=[];if(r.total==null)miss.push('total');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
+  if(o.washSeen&&!o.sticker)miss.push('sticker photo');
   o.state='ready';setStatus(o,miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save',miss.length?'warn':'');
   showCar(o);
 }
@@ -637,10 +662,17 @@ function save(o){
   var b=collect(o),el=document.getElementById(o.id);
   if(!carFor(b.plate)){setStatus(o,'Pick the car (plate, or year / make / model / color)','err');el.querySelector('[data-carq]').focus();return Promise.resolve();}
   if(!(parseFloat(String(b.total).replace(/[$,]/g,''))>=0)){setStatus(o,'Enter the total','err');el.querySelector('[data-f=total]').focus();return Promise.resolve();}
+  var won=el.querySelector('[data-washon]'),wbox=el.querySelector('[data-wash]');
+  if(won&&won.checked&&!wbox.classList.contains('hidden')){
+    var wget=function(k){return el.querySelector('[data-w='+k+']').value.trim();};
+    if(!o.sticker){setStatus(o,'Add a photo of the membership sticker','err');wbox.scrollIntoView({block:'center'});return Promise.resolve();}
+    if(!wget('sticker_no')){setStatus(o,'Enter the number on the sticker','err');el.querySelector('[data-w=sticker_no]').focus();return Promise.resolve();}
+    b.membership={vendor:b.vendor,sticker_no:wget('sticker_no'),member_no:wget('member_no'),monthly_amount:wget('monthly_amount'),billing_day:wget('billing_day'),plan:((o.items&&o.items[0]&&o.items[0].desc)||'').replace(/[\s:]+$/,''),sticker_image:o.sticker};
+  }
   o.state='saving';setStatus(o,'Saving…');el.querySelector('[data-save]').disabled=true;
   b.image=stack(o.imgs);
   return api('POST','',b).then(function(j){
-    o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')'+(j.by?' · by '+j.by:''),'ok');
+    o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')'+(j.membership?' · membership sticker '+j.membership.sticker_no+(j.membership.replaced?' (replaced the old one)':''):'')+(j.by?' · by '+j.by:''),'ok');
     el.querySelector('[data-form]').classList.add('hidden');el.querySelector('[data-del]').textContent='×';updateSaveAll();toast('Saved '+money(j.amount)+' to '+j.plate);
   }).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
 }
@@ -660,7 +692,18 @@ $('libIn').onchange=function(){onFiles(this,true);};
 $('invoices').addEventListener('change',function(e){
   var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
   if(t.hasAttribute('data-addpage')){var fs=[].slice.call(t.files||[]);t.value='';if(fs.length)addPages(o,fs);}
+  if(t.hasAttribute('data-washon'))card.querySelector('[data-washbody]').classList.toggle('hidden',!t.checked);
+  if(t.hasAttribute('data-sticker')){var sf=t.files&&t.files[0];t.value='';if(!sf)return;
+    fileToImg(sf).then(function(img){
+      o.sticker=scaled(img,1600).toDataURL('image/jpeg',.85);var ti=card.querySelector('[data-stickerimg]');ti.src=o.sticker;ti.classList.remove('hidden');
+      if(o.state==='ready')setStatus(o,'Sticker photo added. Reading its number…');
+      return ocr(forOcr(img)).then(function(tx){var n=stickerNumber(tx),si=card.querySelector('[data-w=sticker_no]');
+        if(n&&!si.value)si.value=n;if(o.state==='ready')setStatus(o,n?'Sticker number read. Check it, then save':'Type the number printed on the sticker',n?'':'warn');});
+    }).catch(function(){toast('Could not open that photo');});}
 });
+/* the longest number-like code on the sticker photo (not a phone number, date or web address) */
+function stickerNumber(tx){var best='';String(tx||'').split(/\s+/).forEach(function(w){w=w.replace(/[^A-Za-z0-9\-]/g,'');
+  if(w.length<5||w.length>20||!/\d{4,}/.test(w)||/^\d{3}-?\d{3}-?\d{4}$/.test(w)||/\d{1,2}-\d{1,2}-\d{2,4}/.test(w))return;if(w.replace(/\D/g,'').length>best.replace(/\D/g,'').length)best=w;});return best;}
 $('invoices').addEventListener('input',function(e){var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
   if(t.getAttribute('data-f')==='note')o.noteEdited=true;
   if(t.hasAttribute('data-carq')){card.querySelector('[data-f=plate]').value='';o.carHow='';var ex=carMatches(t.value);
@@ -674,7 +717,7 @@ $('invoices').addEventListener('click',function(e){
   var pk=t.closest('[data-pick]');if(pk){e.preventDefault();pickCar(o,carFor(pk.getAttribute('data-pick')));return;}
   if(t.closest('[data-save]')){e.preventDefault();save(o);}
   else if(t.closest('[data-del]')){if(o.state==='saved'||confirm('Remove this invoice? It has not been saved.')){card.remove();delete INV[o.id];updateSaveAll();}}
-  else if(t.tagName==='IMG'&&t.closest('.thumbs')){var lb=$('lb');lb.querySelector('img').src=t.src;lb.style.display='flex';}
+  else if(t.tagName==='IMG'&&(t.closest('.thumbs')||t.hasAttribute('data-stickerimg'))){var lb=$('lb');lb.querySelector('img').src=t.src;lb.style.display='flex';}
 });
 $('lb').onclick=function(){this.style.display='none';};
 $('saveAll').onclick=function(){var ids=Object.keys(INV).filter(function(k){return INV[k].state==='ready';});ids.reduce(function(p,k){return p.then(function(){return save(INV[k]);});},Promise.resolve());};
