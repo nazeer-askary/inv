@@ -74,6 +74,7 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
 .gate h2{margin:0 0 6px}
 .tabs{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:var(--bg);padding:4px;border-radius:12px;margin-bottom:6px}
 .tabs button{font:inherit;font-weight:650;font-size:14px;border:none;border-radius:9px;padding:9px;background:none;color:var(--ink2)}
+.linkbtn{display:block;margin:12px auto 0;background:none;border:none;color:var(--brand);font:inherit;font-size:14px;font-weight:600;cursor:pointer;padding:6px}
 .tabs button.on{background:var(--card);color:var(--brand);box-shadow:0 1px 3px rgba(0,0,0,.12)}
 .who{font-size:12.5px;opacity:.85;font-weight:600;margin-right:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34vw}
 .toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));max-width:600px;margin:0 auto;background:#16305C;color:#fff;padding:12px 14px;border-radius:12px;font-weight:600;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:20;display:none}
@@ -110,7 +111,24 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
       <label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" required>
       <label for="lPass">Your passcode</label><input id="lPass" type="password" autocomplete="current-password" required>
       <div class="actions"><button class="btn primary" type="submit">Sign in</button></div>
-      <p class="muted" style="margin-top:10px">Forgot your passcode? Ask Nazeer to reset it, then join again.</p>
+      <button type="button" class="linkbtn" id="forgotBtn">Forgot passcode? Reset by text</button>
+    </form>
+    <form id="resetForm" class="hidden" autocomplete="on">
+      <h3 style="margin:4px 0 2px">Reset your passcode</h3>
+      <div id="rStep1">
+        <p class="muted">We'll text a 6-digit code to the phone number you joined with.</p>
+        <label for="rEmail">Email</label><input id="rEmail" type="email" autocomplete="username" inputmode="email" autocapitalize="off" required>
+        <div class="actions"><button class="btn primary" type="button" id="rSend">Text me a code</button></div>
+      </div>
+      <div id="rStep2" class="hidden">
+        <p class="status ok" id="rSent"></p>
+        <label for="rCode">Code from the text</label><input id="rCode" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="6 digits">
+        <label for="rPass">New passcode</label><input id="rPass" type="password" autocomplete="new-password" minlength="6" placeholder="At least 6 characters">
+        <label for="rPass2">Type it again</label><input id="rPass2" type="password" autocomplete="new-password" minlength="6">
+        <div class="actions"><button class="btn primary" type="submit">Set new passcode</button></div>
+        <button type="button" class="linkbtn" id="rResend">Didn't get it? Send another code</button>
+      </div>
+      <button type="button" class="linkbtn" id="rBack">Back to sign in</button>
     </form>
     <p id="gateErr" class="status err hidden"></p>
   </section>
@@ -175,7 +193,7 @@ function deviceName(){var u=navigator.userAgent,os=/iPhone/.test(u)?'iPhone':/iP
 function showGate(tab){$('app').classList.add('hidden');$('recentBtn').classList.add('hidden');$('lockBtn').classList.add('hidden');$('who').classList.add('hidden');
   $('gate').classList.remove('hidden');setTab(tab||'join');}
 function setTab(t){[].forEach.call(document.querySelectorAll('.tabs button'),function(b){b.classList.toggle('on',b.getAttribute('data-tab')===t);});
-  $('joinForm').classList.toggle('hidden',t!=='join');$('loginForm').classList.toggle('hidden',t!=='login');$('gateErr').classList.add('hidden');}
+  $('joinForm').classList.toggle('hidden',t!=='join');$('loginForm').classList.toggle('hidden',t!=='login');$('resetForm').classList.add('hidden');$('gateErr').classList.add('hidden');}
 [].forEach.call(document.querySelectorAll('.tabs button'),function(b){b.onclick=function(){setTab(b.getAttribute('data-tab'));};});
 function gateErr(m){var e=$('gateErr');e.textContent=m;e.classList.remove('hidden');}
 function enter(){
@@ -196,6 +214,23 @@ $('joinForm').onsubmit=function(e){e.preventDefault();var f=this;
 $('loginForm').onsubmit=function(e){e.preventDefault();var f=this;busy(f,true);$('gateErr').classList.add('hidden');
   api('POST','?what=login',{email:$('lEmail').value.trim(),passcode:$('lPass').value,device_id:deviceId(),device_name:deviceName()})
     .then(signedIn).catch(function(err){gateErr(err.message);}).then(function(){busy(f,false);});};
+/* forgot passcode: a code texted to the phone on file */
+$('forgotBtn').onclick=function(){$('loginForm').classList.add('hidden');$('resetForm').classList.remove('hidden');$('rStep1').classList.remove('hidden');$('rStep2').classList.add('hidden');
+  $('rEmail').value=$('lEmail').value;$('gateErr').classList.add('hidden');$('rEmail').focus();};
+$('rBack').onclick=function(){setTab('login');};
+function sendCode(btn){var em=$('rEmail').value.trim();if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(em)){gateErr('Enter the email you joined with');return;}
+  btn.disabled=true;$('gateErr').classList.add('hidden');
+  api('POST','?what=reset_start',{email:em}).then(function(j){$('rSent').textContent=j.message;$('rStep1').classList.add('hidden');$('rStep2').classList.remove('hidden');$('rCode').focus();})
+    .catch(function(e){gateErr(e.message);}).then(function(){btn.disabled=false;});}
+$('rSend').onclick=function(){sendCode(this);};
+$('rResend').onclick=function(){sendCode(this);};
+$('resetForm').onsubmit=function(e){e.preventDefault();var f=this;
+  if($('rPass').value.length<6){gateErr('Your new passcode needs at least 6 characters');return;}
+  if($('rPass').value!==$('rPass2').value){gateErr('The two passcodes don’t match');return;}
+  busy(f,true);$('gateErr').classList.add('hidden');
+  api('POST','?what=reset_finish',{email:$('rEmail').value.trim(),code:$('rCode').value.trim(),passcode:$('rPass').value,device_id:deviceId(),device_name:deviceName()})
+    .then(function(j){return signedIn(j).then(function(){toast('Passcode changed. Other phones were signed out.');});})
+    .catch(function(err){gateErr(err.message);}).then(function(){busy(f,false);});};
 $('lockBtn').onclick=function(){if(!confirm('Sign out on this phone?'))return;api('POST','?what=logout',{}).catch(function(){}).then(function(){SESSION='';store('er_inv_session',null);location.reload();});};
 store('er_inv_pass',null);   /* the old shared-passcode sign-in is gone */
 SESSION=load('er_inv_session')||'';
