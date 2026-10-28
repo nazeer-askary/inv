@@ -16,5 +16,5 @@ Every invoice records who uploaded it (`expenses.uploaded_by`, `uploaded_by_name
 This page holds no keys: the database is reached only through the `invoice-intake` function.
 People are in `invoice_users` (passcodes stored as salted PBKDF2 hashes); signed-in phones in `invoice_sessions`.
 The team code is not in this repo. To change it, store the new code's SHA-256 in `public.app_secrets`
-(name `invoice_passcode_sha256`). To reset someone's passcode, delete their `invoice_users` row (their past
-invoices keep their name) and have them join again; to block someone, set `active = false`.
+(name `invoice_passcode_sha256`). Forgot passcode: on Sign in, tap "Forgot passcode?" and enter the email and phone you joined with plus the team code,
+then a new passcode (other phones are signed out). To block someone, set `active = false` in `invoice_users`.
