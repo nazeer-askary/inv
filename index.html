@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#16305C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Invoices">
+<title>Easy Rentalz Invoices</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%231E63B4'/%3E%3Cpath d='M7 4h7l3 3v13H7z' fill='%23fff'/%3E%3Cpath d='M9 11h6M9 14h6M9 17h4' stroke='%231E63B4' stroke-width='1.6'/%3E%3C/svg%3E">
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--ink:#14213d;--ink2:#4a5670;--ink3:#8590a6;--line:#e2e7f0;--brand:#1E63B4;--brand2:#16305C;--tint:#e8f0fb;--accent:#EA842A;--good:#16834f;--goodbg:#e4f5ec;--bad:#c23b3b;--badbg:#fbe9e9;--warn:#a86512;--warnbg:#fdf1e2;--r:14px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0e1420;--card:#172033;--ink:#e8edf6;--ink2:#b3bdd0;--ink3:#7c879d;--line:#26314a;--brand:#5b9be8;--brand2:#9cc3f2;--tint:#1b2a45;--good:#4ccf8b;--goodbg:#143426;--bad:#ff7b7b;--badbg:#3a1a1d;--warn:#f0b061;--warnbg:#3a2a14}}
+:root[data-theme="dark"]{--bg:#0e1420;--card:#172033;--ink:#e8edf6;--ink2:#b3bdd0;--ink3:#7c879d;--line:#26314a;--brand:#5b9be8;--brand2:#9cc3f2;--tint:#1b2a45;--good:#4ccf8b;--goodbg:#143426;--bad:#ff7b7b;--badbg:#3a1a1d;--warn:#f0b061;--warnbg:#3a2a14}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-text-size-adjust:100%}
+header{position:sticky;top:0;z-index:5;background:#16305C;color:#fff;padding:calc(12px + env(safe-area-inset-top)) 16px 12px;display:flex;align-items:center;gap:10px}
+header h1{font-size:17px;margin:0;font-weight:750;flex:1}
+header h1 b{color:#F3B01C}
+header button{background:rgba(255,255,255,.14);color:#fff;border:none;border-radius:10px;padding:7px 11px;font:inherit;font-size:13px}
+main{max-width:640px;margin:0 auto;padding:14px 16px calc(40px + env(safe-area-inset-bottom))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:14px}
+.big{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{appearance:none;border:none;border-radius:12px;padding:14px 12px;font:inherit;font-weight:650;display:flex;align-items:center;justify-content:center;gap:8px;cursor:pointer;text-decoration:none}
+.btn.primary{background:var(--brand);color:#fff}
+.btn.ghost{background:var(--tint);color:var(--brand)}
+.btn.good{background:var(--good);color:#fff}
+.btn:disabled{opacity:.5}
+.btn svg{width:20px;height:20px}
+label{display:block;font-size:12.5px;font-weight:650;color:var(--ink2);margin:10px 0 4px}
+input,select,textarea{width:100%;font:inherit;font-size:16px;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 11px}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:0;border-color:transparent}
+textarea{min-height:60px;resize:vertical}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+.inv-top{display:flex;gap:12px;align-items:flex-start}
+.thumbs{display:flex;gap:6px;flex:none}
+.thumbs img{width:64px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in}
+.inv-h{flex:1;min-width:0}
+.inv-h .t{font-weight:750;font-size:15.5px}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;font-weight:650;padding:3px 9px;border-radius:20px;margin-top:4px;background:var(--tint);color:var(--brand)}
+.status.ok{background:var(--goodbg);color:var(--good)}
+.status.err{background:var(--badbg);color:var(--bad)}
+.status.warn{background:var(--warnbg);color:var(--warn)}
+.found{font-size:12px;color:var(--good);font-weight:600;margin-top:3px}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:8px}
+.bar i{display:block;height:100%;background:var(--brand);width:0;transition:width .2s}
+details{margin-top:10px}
+summary{font-size:13px;font-weight:650;color:var(--brand);cursor:pointer}
+pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);border-radius:8px;padding:8px;max-height:220px;overflow:auto}
+.items{width:100%;border-collapse:collapse;font-size:13px;margin-top:6px}
+.items td{padding:5px 4px;border-top:1px solid var(--line)}
+.items td.r{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.items input{padding:6px 7px;font-size:14px}
+.actions{display:flex;gap:8px;margin-top:12px}
+.actions .btn{flex:1;padding:12px}
+.x{background:none;border:none;color:var(--ink3);font-size:22px;line-height:1;padding:0 4px;cursor:pointer}
+.muted{color:var(--ink3);font-size:13px}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--line);font-size:14px}
+.list li:first-child{border-top:none}
+.list b{font-variant-numeric:tabular-nums}
+.gate{max-width:420px;margin:12vh auto 0}
+.gate h2{margin:0 0 6px}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom));max-width:600px;margin:0 auto;background:#16305C;color:#fff;padding:12px 14px;border-radius:12px;font-weight:600;font-size:14px;box-shadow:0 8px 24px rgba(0,0,0,.25);z-index:20;display:none}
+.lb{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;z-index:30}
+.lb img{max-width:96vw;max-height:92vh}
+.hidden{display:none!important}
+@media(max-width:380px){.row3{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Easy <b>Rentalz</b> · Invoices</h1>
+  <button id="recentBtn" class="hidden" type="button">Saved</button>
+  <button id="lockBtn" class="hidden" type="button" title="Forget the passcode on this phone">Lock</button>
+</header>
+
+<main>
+  <!-- passcode gate -->
+  <section id="gate" class="card gate hidden">
+    <h2>Enter passcode</h2>
+    <p class="muted">Asked once on each phone. It's stored only on this device.</p>
+    <form id="gateForm">
+      <input id="pass" type="password" autocomplete="current-password" placeholder="Passcode" required>
+      <div class="actions"><button class="btn primary" type="submit">Unlock</button></div>
+      <p id="gateErr" class="status err hidden"></p>
+    </form>
+  </section>
+
+  <section id="app" class="hidden">
+    <div class="card">
+      <div class="big">
+        <label class="btn primary" style="margin:0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+          Take photo
+          <input id="camIn" type="file" accept="image/*" capture="environment" class="hidden">
+        </label>
+        <label class="btn ghost" style="margin:0">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
+          From photos
+          <input id="libIn" type="file" accept="image/*" multiple class="hidden">
+        </label>
+      </div>
+      <p class="muted" style="margin:10px 2px 0">Each photo becomes one invoice. For a multi-page invoice, add the other pages with “+ page”. The text is read on this phone; check the fields, then save.</p>
+    </div>
+
+    <div id="invoices"></div>
+
+    <div id="saveAllWrap" class="hidden" style="margin-bottom:14px"><button id="saveAll" class="btn good" style="width:100%">Save all ready invoices</button></div>
+
+    <section id="recent" class="card hidden">
+      <div style="display:flex;justify-content:space-between;align-items:center"><b>Saved from phones</b><button class="x" id="recentClose" aria-label="Close">×</button></div>
+      <ul class="list" id="recentList"><li class="muted">Loading…</li></ul>
+    </section>
+  </section>
+</main>
+
+<div class="toast" id="toast"></div>
+<div class="lb" id="lb"><img alt="Invoice photo"></div>
+<datalist id="plates"></datalist>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+(function(){
+'use strict';
+var API='https://ovhijhkosaljyqapehoz.supabase.co/functions/v1/invoice-intake';
+var CATS=['Maintenance','Repair','Tires','Parts','Cleaning / Detail','Registration / Title','Tolls / Citations','Other'];
+var CARS=[],PASS='',seq=0,INV={};
+var $=function(id){return document.getElementById(id);};
+function store(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){}}
+function load(k){try{return localStorage.getItem(k);}catch(e){return null;}}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
+function toast(t,ms){var e=$('toast');e.textContent=t;e.style.display='block';clearTimeout(toast._t);toast._t=setTimeout(function(){e.style.display='none';},ms||2600);}
+function money(n){return n==null||isNaN(n)?'':'$'+Number(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});}
+
+/* ---------- API ---------- */
+function api(method,qs,body){
+  return fetch(API+(qs||''),{method:method,headers:Object.assign({'x-passcode':PASS},body?{'Content-Type':'application/json'}:{}),body:body?JSON.stringify(body):undefined})
+    .then(function(r){return r.json().then(function(j){if(!r.ok)throw new Error(j.error||('Error '+r.status));return j;});});
+}
+
+/* ---------- passcode gate ---------- */
+function unlock(p){
+  PASS=p;
+  return api('GET','?what=fleet').then(function(j){
+    CARS=j.cars||[];store('er_inv_pass',p);
+    $('plates').innerHTML=CARS.map(function(c){return '<option value="'+esc(c.plate)+'">'+esc(c.name)+'</option>';}).join('');
+    $('gate').classList.add('hidden');$('app').classList.remove('hidden');$('recentBtn').classList.remove('hidden');$('lockBtn').classList.remove('hidden');
+  });
+}
+$('gateForm').onsubmit=function(e){e.preventDefault();var p=$('pass').value.trim();$('gateErr').classList.add('hidden');
+  unlock(p).catch(function(err){PASS='';$('gateErr').textContent=err.message;$('gateErr').classList.remove('hidden');});};
+$('lockBtn').onclick=function(){store('er_inv_pass',null);location.reload();};
+var saved=load('er_inv_pass');
+if(saved)unlock(saved).catch(function(){store('er_inv_pass',null);$('gate').classList.remove('hidden');});else $('gate').classList.remove('hidden');
+
+/* ---------- images ---------- */
+function fileToImg(file){return new Promise(function(res,rej){var u=URL.createObjectURL(file),i=new Image();i.onload=function(){res(i);};i.onerror=function(){rej(new Error('Could not open that photo'));};i.src=u;});}
+function scaled(img,max){var s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));var c=document.createElement('canvas');c.width=Math.round(img.naturalWidth*s);c.height=Math.round(img.naturalHeight*s);c.getContext('2d').drawImage(img,0,0,c.width,c.height);return c;}
+/* grey + contrast stretch helps OCR on phone photos of paper */
+function forOcr(img){
+  var c=scaled(img,2200),x=c.getContext('2d'),d=x.getImageData(0,0,c.width,c.height),p=d.data,h=new Array(256).fill(0),n=p.length/4;
+  for(var i=0;i<p.length;i+=4){var g=(p[i]*.299+p[i+1]*.587+p[i+2]*.114)|0;p[i]=p[i+1]=p[i+2]=g;h[g]++;}
+  var lo=0,hi=255,acc=0;for(lo=0;lo<255;lo++){acc+=h[lo];if(acc>n*.01)break;}acc=0;for(hi=255;hi>0;hi--){acc+=h[hi];if(acc>n*.01)break;}
+  lo=Math.min(lo,100);hi=Math.max(hi,170);   /* only stretch genuinely flat photos; a mostly-white page stays as it is */
+  var span=Math.max(1,hi-lo);for(i=0;i<p.length;i+=4){var v=Math.max(0,Math.min(255,(p[i]-lo)*255/span));p[i]=p[i+1]=p[i+2]=v;}
+  x.putImageData(d,0,0);return c;
+}
+/* pages stacked into one JPEG for upload */
+function stack(imgs){
+  var w=1400,parts=imgs.map(function(im){var s=Math.min(1,w/im.naturalWidth);return {im:im,w:Math.round(im.naturalWidth*s),h:Math.round(im.naturalHeight*s)};});
+  var W=Math.max.apply(null,parts.map(function(p){return p.w;})),H=parts.reduce(function(a,p){return a+p.h;},0);
+  var sc=Math.min(1,6000/H),c=document.createElement('canvas');c.width=Math.round(W*sc);c.height=Math.round(H*sc);var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,c.width,c.height);
+  var y=0;parts.forEach(function(p){x.drawImage(p.im,0,y,p.w*sc,p.h*sc);y+=p.h*sc;});
+  return c.toDataURL('image/jpeg',.8);
+}
+
+/* ---------- OCR (one shared worker) ---------- */
+var workerP=null,progressCb=null;
+function worker(){
+  if(!workerP)workerP=Tesseract.createWorker('eng',1,{logger:function(m){if(progressCb&&m.status==='recognizing text')progressCb(m.progress);}});
+  return workerP;
+}
+var queue=Promise.resolve();
+function ocr(canvas,onProgress){
+  var job=queue.then(function(){return worker();}).then(function(w){progressCb=onProgress;return w.recognize(canvas);}).then(function(r){progressCb=null;return r.data.text||'';});
+  queue=job.catch(function(){});return job;
+}
+
+/* ---------- reading the text ---------- */
+var MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
+function amountsIn(line){var out=[],re=/(?:\$\s?)?(-?\d{1,3}(?:[,\s]\d{3})*|\d+)[.,](\d{2})(?!\d)/g,m;while((m=re.exec(line))){out.push(parseFloat(m[1].replace(/[,\s]/g,'')+'.'+m[2]));}return out;}
+function iso(y,m,d){if(y<100)y+=2000;if(m<1||m>12||d<1||d>31)return null;var dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1)return null;
+  var now=new Date(),ago=new Date(now.getFullYear()-3,0,1);if(dt>new Date(now.getTime()+3*864e5)||dt<ago)return null;
+  return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
+function findDate(lines){
+  var best=null;
+  lines.forEach(function(l,i){
+    var m,cands=[],re1=/\b(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})\b/g,re2=/\b(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})\b/g,re3=/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/gi;
+    while((m=re1.exec(l)))cands.push(iso(+m[3],+m[1],+m[2]));
+    while((m=re2.exec(l)))cands.push(iso(+m[1],+m[2],+m[3]));
+    while((m=re3.exec(l)))cands.push(iso(+m[3],MONTHS[m[1].toLowerCase()],+m[2]));
+    cands.filter(Boolean).forEach(function(d){var score=(/date|invoice|issued|order|service/i.test(l)?10:0)-i*.05-(/due|exp/i.test(l)?6:0);if(!best||score>best.s)best={d:d,s:score};});
+  });
+  return best&&best.d;
+}
+var NOT_MONEY=/deductible|limit|coverage|policy|odometer|mileage|phone|fax|tel\b|zip|account|acct|claim\s*(no|number|#)|member|routing/i;
+function lastAmount(lines,re,not){for(var i=lines.length-1;i>=0;i--){var l=lines[i];if(re.test(l)&&!(not&&not.test(l))&&!NOT_MONEY.test(l)){var a=amountsIn(l);if(a.length)return a[a.length-1];var alone=l.replace(/[^a-z]/gi,'').length<=22;var nx=alone&&lines[i+1]&&!NOT_MONEY.test(lines[i+1])&&amountsIn(lines[i+1]);if(nx&&nx.length)return nx[nx.length-1];}}return null;}
+/* the figure you actually paid, best label first */
+var TOTAL_LABELS=[/balance\s*due|amount\s*due|total\s*due|amount\s*paid|total\s*paid/i,/grand\s*total|invoice\s*total|net\s*cost\s*of\s*repairs?|net\s*total|total\s*amount|order\s*total/i,/gross\s*total|estimate\s*total/i,/^\s*total\b|\btotal\b/i];
+var NOT_TOTAL=/sub\s*-?\s*total|total\s*(parts|labor|labour|tax|discount|savings|units|hours|items?|price|cost\s*each|qty|quantity)|(parts|labor|labour|tax|paint|materials?|sublet|items?)\s*total|total\s*(qty|quantity)/i;
+function findTotal(lines){for(var k=0;k<TOTAL_LABELS.length;k++){var v=lastAmount(lines,TOTAL_LABELS[k],NOT_TOTAL);if(v!=null&&v>=0)return v;}return null;}
+/* category = the one whose keywords appear most (one stray word like "tire pressure" in an options list can't win) */
+var CAT_WORDS={
+  'Tires':/\b(new tires?|tire (install|mount|repair|rotation)|mount (and|&) balance|wheel balanc\w*|alignment|tyres?|\d{3}\/\d{2}r\d{2})\b/gi,
+  'Maintenance':/\b(oil change|lube|oil filter|air filter|cabin filter|state inspection|inspection fee|wiper|maintenance|tune.?up|coolant|transmission fluid|brake fluid|synthetic|multi.?point)\b/gi,
+  'Cleaning / Detail':/\b(car wash|wash|detail\w*|vacuum|shampoo|interior clean\w*|odor)\b/gi,
+  'Registration / Title':/\b(registration|title|tag renewal|dmv|county tax|license fee|txdmv)\b/gi,
+  'Tolls / Citations':/\b(toll\w*|citation|parking ticket|violation|ez ?tag|hctra|txtag)\b/gi,
+  'Parts':/\b(autozone|o.?reilly|advance auto|napa|rockauto|part (no|number|#)|parts? only|core charge)\b/gi,
+  'Repair':/\b(repair\w*|labor|labour|brake pads?|rotors?|collision|body (shop|labor)|bumper|fender|diagnos\w*|alternator|battery|starter|suspension|strut|axle|refinish|paint|frame|radiator|headlamp|windshield)\b/gi
+};
+function guessCategory(t){
+  var best='Other',n=0;
+  Object.keys(CAT_WORDS).forEach(function(c){var m=t.match(CAT_WORDS[c]);var k=m?m.length:0;if(k>n){n=k;best=c;}});
+  return best;
+}
+var BIZ=/\b(auto|automotive|body|paint|collision|tire|tires|lube|oil|service|services|repair|motors?|garage|shop|parts|wash|detail|glass|towing|tow|llc|inc|co\.?|corp|company|store|center|centre|express|depot|zone|dealership|nissan|toyota|ford|chevrolet|hyundai|kia|bmw|mercedes|honda)\b/i;
+var NOT_VENDOR=/invoice|receipt|estimate|original|repair\s*order|work\s*order|date|phone|tel|fax|www\.|@|page\s*\d|bill\s*to|ship\s*to|sold\s*to|customer|owner|insured|appraiser|adjuster|claim|policy|vin\b|license|plate|odometer|mileage|^total|thank/i;
+function findVendor(lines){
+  var best=null;
+  lines.slice(0,25).forEach(function(raw,i){var l=raw.replace(/\s{2,}/g,' ').trim();
+    if(l.length<4||l.length>60||NOT_VENDOR.test(l))return;
+    var letters=(l.match(/[a-z]/gi)||[]).length;if(letters<l.length*.55||letters<4)return;
+    var words=l.split(' ').length,score=-i*.3+(BIZ.test(l)?6:0)+(words>=2&&words<=6?2:-2)+(/^[A-Z0-9 &'.,-]+$/.test(l)?1:0);
+    if(!best||score>best.s)best={l:l,s:score};});
+  return best?best.l.slice(0,80):'';
+}
+function findOdometer(lines){
+  for(var i=0;i<lines.length;i++){if(!/\b(odometer|mileage|odo\b|miles?\s*(in|out))/i.test(lines[i]))continue;
+    var m=lines[i].match(/(?:odometer|mileage|odo|miles?)\s*(?:in|out)?\s*[:#]?\s*([\d,]{3,7})\b/i);if(m)return m[1].replace(/,/g,'');
+    var nx=(lines[i+1]||'').match(/\b(\d{1,3}(?:,\d{3})+|\d{3,6})\b/);if(nx)return nx[1].replace(/,/g,'');}
+  return '';
+}
+function parse(text){
+  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean),flat=lines.join('\n');
+  var total=findTotal(lines);
+  var subtotal=lastAmount(lines,/sub\s*-?\s*total/i);
+  var tax=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax/i);
+  var all=[];lines.forEach(function(l){if(!NOT_MONEY.test(l))all=all.concat(amountsIn(l));});
+  /* no labelled total: on a short receipt the biggest amount is the total; on a long document it's a guess, so leave it for you */
+  if(total==null&&all.length&&lines.length<=40)total=Math.max.apply(null,all);
+  var inv='',im,ire=/\b(?:invoice|inv|repair\s*order|order|receipt|ticket|work\s*order|estimate\s*id|ro|wo)\b\.?\s*(?:no\.?|number|#|id)?\s*[:#]?\s*([A-Z0-9][A-Z0-9\-\/]{2,})/gi;
+  while(!inv&&(im=ire.exec(flat))){if(/\d/.test(im[1])&&!/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}$/.test(im[1]))inv=im[1];}
+  var odo=findOdometer(lines);
+  var items=[];lines.forEach(function(l){
+    if(/total|tax|balance|amount due|change|cash|visa|mastercard|amex|discover|debit|credit|payment|tender|subtotal/i.test(l)||NOT_MONEY.test(l))return;
+    var a=amountsIn(l);if(!a.length)return;var desc=l.replace(/(?:\$\s?)?-?\d{1,3}(?:[,\s]\d{3})*[.,]\d{2}/g,'').replace(/\s{2,}/g,' ').trim();
+    if(desc.replace(/[^a-z]/gi,'').length<3)return;items.push({desc:desc.slice(0,90),amount:a[a.length-1]});});
+  /* car: a VIN or plate printed on the invoice */
+  var up=flat.toUpperCase(),car=null,how='';
+  CARS.forEach(function(c){if(car)return;if(c.vin&&(up.indexOf(c.vin)>=0||up.replace(/O/g,'0').indexOf(c.vin.replace(/O/g,'0'))>=0)){car=c;how='VIN';}});
+  if(!car)CARS.forEach(function(c){if(car)return;var p=c.plate,re=new RegExp('\\b'+p.slice(0,3)+'[\\s\\-]?'+p.slice(3)+'\\b');if(re.test(up)){car=c;how='plate';}});
+  if(!car)CARS.forEach(function(c){if(car||!c.vin)return;var tail=c.vin.slice(-6);if(new RegExp('VIN[^\\n]{0,25}'+tail).test(up)){car=c;how='VIN ending '+tail;}});
+  return {vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how};
+}
+
+/* ---------- invoice cards ---------- */
+function newInvoice(files){
+  var id='i'+(++seq),o=INV[id]={id:id,files:[],imgs:[],text:'',state:'reading'};
+  var el=document.createElement('div');el.className='card';el.id=id;$('invoices').prepend(el);
+  el.innerHTML='<div class="inv-top"><div class="thumbs"></div><div class="inv-h"><div class="t">Invoice</div><span class="status" data-st>Reading…</span><div class="bar"><i></i></div></div><button class="x" data-del aria-label="Remove">×</button></div>'+
+    '<div data-form class="hidden">'+
+      '<label>License plate</label><input data-f="plate" list="plates" autocapitalize="characters" autocomplete="off" placeholder="e.g. VBM9358"><div class="found" data-carname></div>'+
+      '<div class="row2"><div><label>Date</label><input data-f="date" type="date"></div><div><label>Total</label><input data-f="total" inputmode="decimal" placeholder="0.00"></div></div>'+
+      '<label>Vendor</label><input data-f="vendor" placeholder="Shop or store name">'+
+      '<div class="row2"><div><label>Category</label><select data-f="category">'+CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div><div><label>Invoice #</label><input data-f="invoice_no"></div></div>'+
+      '<div class="row3"><div><label>Subtotal</label><input data-f="subtotal" inputmode="decimal"></div><div><label>Tax</label><input data-f="tax" inputmode="decimal"></div><div><label>Odometer</label><input data-f="odometer" inputmode="numeric"></div></div>'+
+      '<label>Notes</label><textarea data-f="note" placeholder="Optional"></textarea>'+
+      '<details data-itemswrap><summary>Line items</summary><table class="items" data-items></table></details>'+
+      '<details><summary>Text read from the photo</summary><pre data-text></pre></details>'+
+      '<div class="actions"><label class="btn ghost" style="margin:0">+ page<input type="file" accept="image/*" data-addpage class="hidden"></label><button class="btn primary" data-save>Save</button></div>'+
+    '</div>';
+  addPages(o,files);return o;
+}
+function setStatus(o,txt,cls){var s=document.querySelector('#'+o.id+' [data-st]');s.textContent=txt;s.className='status'+(cls?' '+cls:'');}
+function carFor(plate){plate=String(plate||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return CARS.filter(function(c){return c.plate===plate;})[0]||null;}
+function showCar(o){var el=document.getElementById(o.id),p=el.querySelector('[data-f=plate]').value,c=carFor(p),n=el.querySelector('[data-carname]');
+  n.textContent=c?c.name+(o.carHow&&p===o.autoPlate?' · found by '+o.carHow+' on the invoice':''):(p?'Not a plate in the fleet list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
+function addPages(o,files){
+  var el=document.getElementById(o.id);o.state='reading';setStatus(o,'Reading…');el.querySelector('.bar').classList.remove('hidden');
+  var list=[].slice.call(files);
+  list.reduce(function(p,f){return p.then(function(){return fileToImg(f).then(function(img){
+      o.imgs.push(img);var t=document.createElement('img');t.src=img.src;t.alt='Page '+o.imgs.length;el.querySelector('.thumbs').appendChild(t);
+      return ocr(forOcr(img),function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';}).then(function(text){o.text+=(o.text?'\n':'')+text;});});});},Promise.resolve())
+  .then(function(){fill(o);})
+  .catch(function(e){setStatus(o,e.message||'Could not read the photo','err');fill(o);});
+}
+function fill(o){
+  var el=document.getElementById(o.id),r=parse(o.text),f=function(k){return el.querySelector('[data-f='+k+']');};
+  el.querySelector('.bar').classList.add('hidden');el.querySelector('[data-form]').classList.remove('hidden');
+  var keep=function(k,v){if(v!=null&&v!==''&&(!f(k).value||o.imgs.length===1||k!=='plate'))f(k).value=v;};
+  if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;f('plate').value=r.car.plate;}else if(!f('plate').value)f('plate').value=load('er_inv_lastplate')||'';
+  keep('date',r.date);keep('vendor',r.vendor);keep('invoice_no',r.invoice_no);keep('odometer',r.odometer);
+  if(r.total!=null)f('total').value=r.total.toFixed(2);if(r.subtotal!=null)f('subtotal').value=r.subtotal.toFixed(2);if(r.tax!=null)f('tax').value=r.tax.toFixed(2);
+  if(o.imgs.length===1||f('category').value==='Other')f('category').value=r.category;
+  o.items=r.items;
+  el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+it.amount.toFixed(2)+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
+  el.querySelector('[data-itemswrap]').open=false;
+  el.querySelector('[data-text]').textContent=o.text||'(no text found)';
+  el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
+  var miss=[];if(r.total==null)miss.push('total');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('plate');
+  o.state='ready';setStatus(o,miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save',miss.length?'warn':'');
+  showCar(o);
+}
+function collect(o){
+  var el=document.getElementById(o.id),v=function(k){return el.querySelector('[data-f='+k+']').value.trim();};
+  var items=(o.items||[]).map(function(it,i){var d=el.querySelector('[data-idesc="'+i+'"]'),a=el.querySelector('[data-iamt="'+i+'"]');return {desc:d?d.value:it.desc,amount:a?parseFloat(a.value)||0:it.amount};});
+  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),note:v('note'),line_items:items,ocr_text:o.text};
+}
+function save(o){
+  if(o.state!=='ready')return Promise.resolve();
+  var b=collect(o),el=document.getElementById(o.id);
+  if(!carFor(b.plate)){setStatus(o,'Enter a plate from the fleet list','err');el.querySelector('[data-f=plate]').focus();return Promise.resolve();}
+  if(!(parseFloat(String(b.total).replace(/[$,]/g,''))>=0)){setStatus(o,'Enter the total','err');el.querySelector('[data-f=total]').focus();return Promise.resolve();}
+  o.state='saving';setStatus(o,'Saving…');el.querySelector('[data-save]').disabled=true;
+  b.image=stack(o.imgs);
+  return api('POST','',b).then(function(j){
+    o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')','ok');
+    el.querySelector('[data-form]').classList.add('hidden');el.querySelector('[data-del]').textContent='×';updateSaveAll();toast('Saved '+money(j.amount)+' to '+j.plate);
+  }).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
+}
+function updateSaveAll(){var n=Object.keys(INV).filter(function(k){return INV[k].state==='ready';}).length;$('saveAllWrap').classList.toggle('hidden',n<2);$('saveAll').textContent='Save all '+n+' ready invoices';}
+
+/* ---------- events ---------- */
+function onFiles(input,each){var fs=[].slice.call(input.files||[]);input.value='';if(!fs.length)return;
+  if(each)fs.forEach(function(f){newInvoice([f]);});else newInvoice(fs);updateSaveAll();}
+$('camIn').onchange=function(){onFiles(this,true);};
+$('libIn').onchange=function(){onFiles(this,true);};
+$('invoices').addEventListener('change',function(e){
+  var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
+  if(t.hasAttribute('data-addpage')){var fs=[].slice.call(t.files||[]);t.value='';if(fs.length)addPages(o,fs);}
+});
+$('invoices').addEventListener('input',function(e){var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;if(t.getAttribute('data-f')==='plate'){t.value=t.value.toUpperCase();showCar(o);}});
+$('invoices').addEventListener('click',function(e){
+  var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
+  if(t.closest('[data-save]')){e.preventDefault();save(o);}
+  else if(t.closest('[data-del]')){if(o.state==='saved'||confirm('Remove this invoice? It has not been saved.')){card.remove();delete INV[o.id];updateSaveAll();}}
+  else if(t.tagName==='IMG'&&t.closest('.thumbs')){var lb=$('lb');lb.querySelector('img').src=t.src;lb.style.display='flex';}
+});
+$('lb').onclick=function(){this.style.display='none';};
+$('saveAll').onclick=function(){var ids=Object.keys(INV).filter(function(k){return INV[k].state==='ready';});ids.reduce(function(p,k){return p.then(function(){return save(INV[k]);});},Promise.resolve());};
+$('recentBtn').onclick=function(){var r=$('recent');r.classList.remove('hidden');r.scrollIntoView({behavior:'smooth'});$('recentList').innerHTML='<li class="muted">Loading…</li>';
+  api('GET','?what=recent').then(function(j){var l=j.invoices||[];$('recentList').innerHTML=l.length?l.map(function(x){return '<li><span>'+esc(x.date||'')+' · <b>'+esc(x.plate||'')+'</b> · '+esc(x.vendor||x.category||'')+'</span><b>'+money(x.amount)+'</b></li>';}).join(''):'<li class="muted">Nothing saved from phones yet.</li>';})
+  .catch(function(e){$('recentList').innerHTML='<li class="muted">'+esc(e.message)+'</li>';});};
+$('recentClose').onclick=function(){$('recent').classList.add('hidden');};
+window.addEventListener('beforeunload',function(e){if(Object.keys(INV).some(function(k){return INV[k].state==='ready'||INV[k].state==='reading';})){e.preventDefault();e.returnValue='';}});
+})();
+</script>
+</body>
+</html>
