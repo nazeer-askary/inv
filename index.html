@@ -430,7 +430,16 @@ var INV_LABELS=[
   /\b(?:repair\s*order|work\s*order|r\.?o\.?|w\.?o\.?|order)\s*(?:no\.?|number|#)\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{2,})/i,
   /\b(?:ref(?:erence)?|seq(?:uence)?|estimate\s*id)\s*(?:no\.?|number|#|id)?\s*[:#.]?\s*([A-Z0-9][A-Z0-9\-]{3,})/i
 ];
+var INV_ASKED=/inv\w{0,4}\s*n\w?mb|invoice\s*(no\b|#)/i;
 function findInvoiceNo(lines){
+  var all=lines.join('\n');
+  if(/auto\s*zone/i.test(all)){var bz=all.match(/\b(0\d{10})(\d{6})C\b/);if(bz)return bz[1];}
+  var got=findInvoiceLabeled(lines);if(got)return got;
+  for(var q=0;q<Math.min(lines.length,12);q++){var lt=lines[q].trim();
+    if(/^[A-Z]{1,2}\d{5,9}$/.test(lt))return lt;}
+  return '';
+}
+function findInvoiceLabeled(lines){
   /* label split across two lines: "...INVOICE" then "NUMBER 826729" */
   for(var j=1;j<lines.length;j++){
     if(!/invoice\W*$|invoice\s*\[?$/i.test(lines[j-1].trim())&&!/\binvoice\b/i.test(lines[j-1]))continue;
@@ -580,18 +589,18 @@ function addPages(o,files){
          shadows evened out, the whole photo with shadows evened out, then the whole photo as is. Keep the best. */
       var tries=(crop?[function(){return forOcr(crop);},function(){return forOcrEven(crop);}]:[]).concat([function(){return forOcrEven(img);},function(){return forOcr(img);}]);
       if(!crop)tries=[function(){return forOcr(img);},function(){return forOcrEven(img);}];
-      var best=null,carSeen=null;
+      var best=null,carSeen=null,invSeen='';
       return tries.reduce(function(pp,mk,ix){return pp.then(function(done){if(done)return true;
           setStatus(o,ix?'Reading… (trying a clearer version)':'Reading…');
-          return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;
-            if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor;});});},Promise.resolve(false))
+          return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(r.invoice_no&&!invSeen)invSeen=r.invoice_no;
+            if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor&&(!!invSeen||!INV_ASKED.test(t));});});},Promise.resolve(false))
         .then(function(){
           /* mostly junk: the paper may be upside down, so try it turned around */
           if(best&&best.sc>=14){var rb=parse(best.t);if(rb.total!=null||rb.date)return;}
           var base=crop||img,rot=rotate180(base);setStatus(o,'Reading… (turning it the right way up)');
           return [function(){return forOcr(rot);},function(){return forOcrEven(rot);}].reduce(function(pp,mk){return pp.then(function(done){if(done)return true;
-            return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor;});});},Promise.resolve(false));})
-        .then(function(){var t=best?best.t:'';if(carSeen&&!parse(t).car)t+='\n'+carSeen.vin;o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
+            return ocr(mk(),bar).then(function(t){var r=parse(t),sc=readScore(t);if(r.car)carSeen=carSeen||r.car;if(r.invoice_no&&!invSeen)invSeen=r.invoice_no;if(!best||sc>best.sc)best={t:t,sc:sc};return r.total!=null&&!!r.date&&!!r.vendor&&(!!invSeen||!INV_ASKED.test(t));});});},Promise.resolve(false));})
+        .then(function(){var t=best?best.t:'';if(carSeen&&!parse(t).car)t+='\n'+carSeen.vin;if(invSeen&&!parse(t).invoice_no)t+='\nInvoice Number: '+invSeen;o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
   .then(function(){fill(o);})
   .catch(function(e){setStatus(o,e.message||'Could not read the photo','err');fill(o);});
 }
