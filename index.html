@@ -880,10 +880,26 @@ function save(o){
   }
   o.state='saving';setStatus(o,'Saving…');el.querySelector('[data-save]').disabled=true;
   b.image=stack(o.imgs);
-  return api('POST','',b).then(function(j){
+  function onSaved(j){
     o.state='saved';store('er_inv_lastplate',j.plate);setStatus(o,'Saved · '+money(j.amount)+' to '+j.car+' ('+j.plate+')'+(j.membership?' · membership sticker '+j.membership.sticker_no+(j.membership.replaced?' (replaced the old one)':''):'')+(j.by?' · by '+j.by:''),'ok');
     el.querySelector('[data-form]').classList.add('hidden');el.querySelector('[data-del]').textContent='×';updateSaveAll();toast('Saved '+money(j.amount)+' to '+j.plate);
-  }).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
+  }
+  function handle(j){
+    /* the function flags a likely duplicate (same signature or same receipt photo) and saves nothing — confirm, then resend with force */
+    if(j&&(j.duplicate||j.duplicate_membership)){
+      var of=j.of||{};
+      var msg=j.duplicate_membership
+        ? 'A car-wash membership with sticker '+(of.sticker_no||'?')+' is already active on another car ('+(of.plate||of.vin||'?')+').\n\nAdd this membership anyway?'
+        : 'Looks like a duplicate of an expense already logged on '+(of.date||'?')+' for '+(of.plate||of.vin||'?')+' ('+money(of.amount)+(of.note?' · '+of.note:'')+').\n\nSave it anyway?';
+      o.state='ready';el.querySelector('[data-save]').disabled=false;
+      if(!confirm(msg)){setStatus(o,'Not saved — looks like a duplicate.','warn');return;}
+      o.state='saving';el.querySelector('[data-save]').disabled=true;setStatus(o,'Saving…');
+      b.force=true;
+      return api('POST','',b).then(onSaved).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
+    }
+    return onSaved(j);
+  }
+  return api('POST','',b).then(handle).catch(function(e){o.state='ready';el.querySelector('[data-save]').disabled=false;setStatus(o,e.message,'err');});
 }
 function updateSaveAll(){var n=Object.keys(INV).filter(function(k){return INV[k].state==='ready';}).length;$('saveAllWrap').classList.toggle('hidden',n<2);$('saveAll').textContent='Save all '+n+' ready invoices';}
 
