@@ -59,6 +59,7 @@ textarea{min-height:60px;resize:vertical}
 .carlist .pl{font-size:12.5px;color:var(--ink3);font-variant-numeric:tabular-nums}
 .carlist .none{padding:10px 12px;color:var(--ink3);font-size:13.5px}
 .found{font-size:12px;color:var(--good);font-weight:600;margin-top:3px}
+.pdfnote{font-size:14px}.pdfnote ul{margin:8px 0 0;padding-left:18px}.pdfnote li{margin:4px 0}.pdfnote.bad [data-pn]{color:var(--bad)}.warnc{color:var(--warn);font-weight:600}
 .bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden;margin-top:8px}
 .bar i{display:block;height:100%;background:var(--brand);width:0;transition:width .2s}
 details{margin-top:10px}
@@ -143,13 +144,14 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
         </label>
         <label class="btn ghost" style="margin:0">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
-          From photos
-          <input id="libIn" type="file" accept="image/*" multiple class="hidden">
+          Photos or PDF
+          <input id="libIn" type="file" accept="image/*,application/pdf,.pdf" multiple class="hidden">
         </label>
       </div>
-      <p class="muted" style="margin:10px 2px 0">Each photo becomes one invoice, saved under your name. For a multi-page invoice, add the other pages with “+ page”. The text is read on this phone; check the fields, then save.</p>
+      <p class="muted" style="margin:10px 2px 0">Each photo becomes one invoice, saved under your name. A PDF with several bills is split into one invoice per bill (per car). For a multi-page invoice, add the other pages with “+ page”. The text is read on this phone; check the fields, then save.</p>
     </div>
 
+    <div id="pdfNotes"></div>
     <div id="invoices"></div>
 
     <div id="saveAllWrap" class="hidden" style="margin-bottom:14px"><button id="saveAll" class="btn good" style="width:100%">Save all ready invoices</button></div>
@@ -747,17 +749,21 @@ function parse(text){
         nt.split('\n').some(function(t){for(var off=0;off<=t.length-17;off++){var d=0;for(var q=0;q<17&&d<3;q++)if(t[off+q]!==v[q])d++;if(d<=2){fz.push(c);return true;}}return false;});});
       if(fz.length===1){car=fz[0];how='VIN';}}}
   /* the model printed on the invoice ("Hyundai : Sonata Hybrid : 2015"), when only one fleet car fits */
+  var modelHint=null;
   if(!car){var fits=CARS.filter(function(c){var nm=String(c.name).replace(/^\d{4}\s+/,''),parts=nm.split(' '),model=parts[1]||'';
       if(model.length<4)return false;
       var mre=new RegExp('\\b'+model.replace(/[^A-Za-z0-9]/g,'.?')+'\\b','i');if(!mre.test(flat))return false;
       return true;});   /* the year only breaks ties below */
     if(fits.length===1){car=fits[0];how='model';}
-    else if(fits.length>1){var withYear=fits.filter(function(c){var yr=(String(c.name).match(/^\d{4}/)||[])[0];return yr&&new RegExp('\\b'+yr+'\\b').test(flat);});if(withYear.length===1){car=withYear[0];how='model and year';}}}
+    else if(fits.length>1){var withYear=fits.filter(function(c){var yr=(String(c.name).match(/^\d{4}/)||[])[0];return yr&&new RegExp('\\b'+yr+'\\b').test(flat);});if(withYear.length===1){car=withYear[0];how='model and year';}
+      else{var pool=withYear.length?withYear:fits,mdl=String(pool[0].name).replace(/^\d{4}\s+/,'').split(' ')[1];
+        if(pool.every(function(c){return String(c.name).replace(/^\d{4}\s+/,'').split(' ')[1]===mdl;}))
+          modelHint={q:(withYear.length?String(pool[0].name).match(/^\d{4}/)[0]+' ':'')+mdl,n:pool.length};}}}
   /* no VIN or plate printed: note any fleet make the invoice mentions ("Hyundai x 1") so the car search can start there */
   var makeHint='';
   if(!car){var makes={};CARS.forEach(function(c){var m=String(c.name).replace(/^\d{4}\s+/,'').split(' ')[0];if(m)makes[m.toLowerCase()]=m;});
     Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
-  var res={makeHint:makeHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:(refund?'Return (refund). ':'')+summarize(lines,items,guessCategory(flat),findVendor(lines)),refund:refund};
+  var res={makeHint:makeHint,modelHint:modelHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:(refund?'Return (refund). ':'')+summarize(lines,items,guessCategory(flat),findVendor(lines)),refund:refund};
   if(/^(AutoZone|O'Reilly Auto Parts|Advance Auto Parts|NAPA)$/.test(res.vendor)&&res.category!=='Fuel')res.category='Parts';
   if(/car\s*wash/i.test(res.vendor||''))res.category='Cleaning / Detail';
   if(/^(LKQ|Shaver Auto Parts)$/.test(res.vendor))res.category='Parts';
@@ -797,8 +803,8 @@ function pickCar(o,c){var el=document.getElementById(o.id);el.querySelector('[da
   el.querySelector('[data-carq]').value=c?carLabel(c):'';el.querySelector('[data-carlist]').hidden=true;if(c)store('er_inv_lastplate',c.plate);showCar(o);}
 
 /* ---------- invoice cards ---------- */
-function newInvoice(files){
-  var id='i'+(++seq),o=INV[id]={id:id,files:[],imgs:[],text:'',state:'reading'};
+function newInvoice(files,opts){
+  var id='i'+(++seq),o=INV[id]={id:id,files:[],imgs:[],text:'',state:'reading'};if(opts)for(var k in opts)o[k]=opts[k];
   var el=document.createElement('div');el.className='card';el.id=id;$('invoices').prepend(el);
   el.innerHTML='<div class="inv-top"><div class="thumbs"></div><div class="inv-h"><div class="t">Invoice</div><span class="status" data-st>Reading…</span><div class="bar"><i></i></div></div><button class="x" data-del aria-label="Remove">×</button></div>'+
     '<div data-form class="hidden">'+
@@ -817,16 +823,16 @@ function newInvoice(files){
       '<details><summary>Text read from the photo</summary><pre data-text></pre></details>'+
       '<div class="actions"><label class="btn ghost" style="margin:0">+ page<input type="file" accept="image/*" data-addpage class="hidden"></label><button class="btn primary" data-save>Save</button></div>'+
     '</div>';
-  addPages(o,files);return o;
+  o.done=addPages(o,files);return o;
 }
 function setStatus(o,txt,cls){var s=document.querySelector('#'+o.id+' [data-st]');s.textContent=txt;s.className='status'+(cls?' '+cls:'');}
 function carFor(plate){plate=String(plate||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return CARS.filter(function(c){return c.plate===plate;})[0]||null;}
 function showCar(o){var el=document.getElementById(o.id),p=el.querySelector('[data-f=plate]').value,c=carFor(p),n=el.querySelector('[data-carname]');
-  n.textContent=c?(o.carHow&&p===o.autoPlate?(o.carHow==='photo'?'Found by the licence plate in the photo':'Found by '+o.carHow+' on the invoice'):o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice mentions '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
+  n.textContent=c?(o.carHow&&p===o.autoPlate?(o.carHow==='photo'?'Found by the licence plate in the photo':'Found by '+o.carHow+' on the invoice'):o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice says '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
 function addPages(o,files){
   var el=document.getElementById(o.id);o.state='reading';setStatus(o,'Reading…');el.querySelector('.bar').classList.remove('hidden');
   var list=[].slice.call(files);
-  list.reduce(function(p,f){return p.then(function(){return (f instanceof Blob?fileToImg(f):Promise.resolve(f)).then(function(img){
+  return list.reduce(function(p,f){return p.then(function(){return (f instanceof Blob?fileToImg(f):Promise.resolve(f)).then(function(img){
       o.imgs.push(img);var t=document.createElement('img');t.src=img.src||(img.toDataURL?img.toDataURL('image/jpeg',.7):'');t.alt='Page '+o.imgs.length;el.querySelector('.thumbs').appendChild(t);
       var bar=function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';};
       return readImage(img,function(m){setStatus(o,m);},bar).then(function(t){o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
@@ -838,7 +844,10 @@ function fill(o){
   el.querySelector('.bar').classList.add('hidden');el.querySelector('[data-form]').classList.remove('hidden');
   var keep=function(k,v){if(v!=null&&v!==''&&(!f(k).value||o.imgs.length===1||k!=='plate'))f(k).value=v;};
   if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;pickCar(o,r.car);}
-  else if(!f('plate').value){var lp=carFor(load('er_inv_lastplate'));
+  else if(!f('plate').value&&r.modelHint){
+    /* "2025 Nissan Kicks" and the fleet has two of them: list just those and let the person tap the right one */
+    o.makeHint=r.modelHint.q;var q0=el.querySelector('[data-carq]');q0.value=r.modelHint.q;carList(o,r.modelHint.q);}
+  else if(!f('plate').value&&!o.fromPdf){var lp=carFor(load('er_inv_lastplate'));
     if(r.makeHint&&!(lp&&lp.name.toLowerCase().indexOf(r.makeHint.toLowerCase())>=0)){
       /* the invoice names a make: start the car search there and let the person tap the right one */
       o.makeHint=r.makeHint;var q=el.querySelector('[data-carq]');q.value=r.makeHint;carList(o,r.makeHint);}
@@ -852,7 +861,7 @@ function fill(o){
     var wv=function(k,v){var i=el.querySelector('[data-w='+k+']');if(v&&!i.value)i.value=v;};
     wv('member_no',r.wash.member_no);wv('billing_day',r.wash.billing_day||(r.date?String(+r.date.slice(8,10)):''));wv('monthly_amount',r.wash.amount?r.wash.amount.toFixed(2):r.total!=null?r.total.toFixed(2):'');}
   else if(!r.wash&&!o.washSeen&&(r.category==='Cleaning / Detail'||/car\s*wash/i.test(r.vendor||''))){el.querySelector('[data-wash]').classList.remove('hidden');el.querySelector('[data-washbody]').classList.add('hidden');}
-  el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+it.amount.toFixed(2)+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
+  el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+(it.amount!=null?it.amount.toFixed(2):'')+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
   el.querySelector('[data-itemswrap]').open=false;
   el.querySelector('[data-text]').textContent=o.text||'(no text found)';
   el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
@@ -903,10 +912,71 @@ function save(o){
 }
 function updateSaveAll(){var n=Object.keys(INV).filter(function(k){return INV[k].state==='ready';}).length;$('saveAllWrap').classList.toggle('hidden',n<2);$('saveAll').textContent='Save all '+n+' ready invoices';}
 
+/* ---------- PDFs: one page per bill, then tidy up ---------- */
+var pdfLib=null;
+function loadPdfLib(){
+  if(!pdfLib)pdfLib=new Promise(function(res,rej){var s=document.createElement('script');s.src='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js';
+    s.onload=function(){window.pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';res(window.pdfjsLib);};
+    s.onerror=function(){pdfLib=null;rej(new Error('Could not load the PDF reader. Check the internet connection.'));};document.head.appendChild(s);});
+  return pdfLib;}
+function isPdf(f){return /pdf$/i.test(f.type||'')||/\.pdf$/i.test(f.name||'');}
+/* each page as a picture about 2000 px tall, the same size a phone photo is read at */
+function pdfPages(file){
+  return Promise.all([loadPdfLib(),file.arrayBuffer()]).then(function(a){return a[0].getDocument({data:a[1]}).promise;}).then(function(doc){
+    var out=[];var one=function(n){return doc.getPage(n).then(function(pg){var v0=pg.getViewport({scale:1}),sc=Math.min(4,2000/Math.max(v0.width,v0.height)),v=pg.getViewport({scale:sc});
+      var c=document.createElement('canvas');c.width=Math.round(v.width);c.height=Math.round(v.height);var g=c.getContext('2d');g.fillStyle='#fff';g.fillRect(0,0,c.width,c.height);
+      return pg.render({canvasContext:g,viewport:v,intent:'print'}).promise.then(function(){out.push(c);});});};
+    var p=Promise.resolve();for(var n=1;n<=doc.numPages;n++)p=p.then(one.bind(null,n));return p.then(function(){return out;});});}
+function pdfNote(html,cls){var d=document.createElement('div');d.className='card pdfnote'+(cls?' '+cls:'');d.innerHTML=html;$('pdfNotes').prepend(d);return d;}
+/* move a page's picture into another invoice (a duplicate copy, or a payment slip) and drop its own card */
+function mergeInto(dst,src,why){var de=document.getElementById(dst.id),se=document.getElementById(src.id);
+  src.imgs.forEach(function(img){dst.imgs.push(img);var t=document.createElement('img');t.src=img.src||(img.toDataURL?img.toDataURL('image/jpeg',.7):'');t.alt='Page '+dst.imgs.length;de.querySelector('.thumbs').appendChild(t);});
+  dst.extra=(dst.extra?dst.extra+' ':'')+why;if(se)se.remove();delete INV[src.id];}
+function onPdf(file){
+  var name=file.name||'PDF',note=pdfNote('<b>'+esc(name)+'</b><div class="muted" data-pn>Opening the PDF…</div>');
+  return pdfPages(file).then(function(pages){
+    note.querySelector('[data-pn]').textContent=pages.length+' page'+(pages.length===1?'':'s')+'. Reading each one as its own bill…';
+    var os=pages.map(function(cv,ix){return newInvoice([cv],{fromPdf:name,page:ix+1,pages:pages.length});});updateSaveAll();
+    /* newest card goes on top; put page 1 first */
+    os.slice().reverse().forEach(function(o){$('invoices').prepend(document.getElementById(o.id));});
+    return Promise.all(os.map(function(o){return o.done;})).then(function(){tidyPdf(os,note,name);});
+  }).catch(function(e){note.querySelector('[data-pn]').textContent=e.message||'Could not open that PDF';note.classList.add('bad');});
+}
+function tidyPdf(os,note,name){
+  var R={};os.forEach(function(o){R[o.id]=parse(o.text);});
+  var tot=function(o){var v=parseFloat(document.querySelector('#'+o.id+' [data-f=total]').value);return isNaN(v)?null:v;};
+  var plate=function(o){return document.querySelector('#'+o.id+' [data-f=plate]').value;};
+  var live=os.slice(),said=[];
+  /* 1. a card payment slip whose amount is all the other bills added up: proof of payment, not another expense */
+  var CARD=/\b(visa|mastercard|master\s*card|amex|discover|debit|chip|auth|appr\w*|batch|trans\s*#|ref\s*#)\b/i;
+  live.slice().forEach(function(o){if(live.length<3||!CARD.test(o.text))return;
+    var others=live.filter(function(x){return x!==o;}),sum=0,ok=true;others.forEach(function(x){var t=tot(x);if(t==null)ok=false;else sum+=t;});
+    if(!ok)return;sum=Math.round(sum*100)/100;
+    if(!amountsIn(o.text).some(function(a){return Math.abs(a-sum)<0.005;}))return;
+    /* the slip often sits on top of a copy of one bill: keep it with that bill, else with the first */
+    var r=R[o.id],host=others.filter(function(x){return r.car&&plate(x)===r.car.plate;})[0]||others[0];
+    mergeInto(host,o,'Card slip '+money(sum)+' (page '+o.page+') pays all '+others.length+' bills.');live.splice(live.indexOf(o),1);
+    said.push('Page '+o.page+' is the card payment of <b>'+money(sum)+'</b>, which matches the '+others.length+' bills added up ✓. It is kept as proof with the '+esc((carFor(plate(host))||{}).name||'first')+' bill, not saved as another expense.');});
+  /* 2. the same bill scanned twice (same car, same total, same date): keep one */
+  live.slice().forEach(function(o,i){var p=plate(o),t=tot(o),d=document.querySelector('#'+o.id+' [data-f=date]').value;if(!p||t==null)return;
+    var twin=live.filter(function(x){return x!==o&&live.indexOf(x)<live.indexOf(o)&&plate(x)===p&&tot(x)===t&&document.querySelector('#'+x.id+' [data-f=date]').value===d;})[0];
+    if(twin){mergeInto(twin,o,'Page '+o.page+' is a second copy.');live.splice(live.indexOf(o),1);said.push('Page '+o.page+' is a second copy of page '+twin.page+', so it is kept as an extra page.');}});
+  /* 3. a page with no total, date or car of its own continues the bill before it */
+  live.slice().forEach(function(o){var r=R[o.id],ix=live.indexOf(o);if(ix<1)return;
+    if(r.total==null&&!r.date&&!r.car&&!r.modelHint){var prev=live[ix-1];mergeInto(prev,o,'Page '+o.page+' continues it.');live.splice(ix,1);said.push('Page '+o.page+' has no total, date or car, so it is page 2 of the bill before it.');}});
+  live.forEach(function(o){var el=document.getElementById(o.id);if(!el)return;var h=el.querySelector('.inv-h .t');
+    h.textContent=h.textContent+' · page '+o.page+' of '+os.length;
+    if(o.extra){var n=el.querySelector('[data-f=note]');n.value=(n.value?n.value+' ':'')+o.extra;o.noteAuto=n.value;}});
+  var needCar=live.filter(function(o){return !carFor(plate(o));}).length,sum=0;live.forEach(function(o){sum+=tot(o)||0;});
+  note.querySelector('[data-pn]').innerHTML=os.length+' pages → <b>'+live.length+' bill'+(live.length===1?'':'s')+'</b>, '+money(sum)+' in all.'+(needCar?' <span class="warnc">'+needCar+' need'+(needCar===1?'s':'')+' you to pick the car.</span>':'')+
+    (said.length?'<ul>'+said.map(function(x){return '<li>'+x+'</li>';}).join('')+'</ul>':'');
+  updateSaveAll();
+}
+
 /* ---------- events ---------- */
 function onFiles(input,each){var fs=[].slice.call(input.files||[]);input.value='';if(!fs.length)return;
   if(!each){newInvoice(fs);updateSaveAll();return;}
-  fs.reduce(function(p,f){return p.then(function(){return fileToImg(f).then(function(img){
+  fs.reduce(function(p,f){return p.then(function(){if(isPdf(f))return onPdf(f);return fileToImg(f).then(function(img){
       /* two (or more) receipts laid side by side in one photo: one invoice each */
       var ps=findPapers(img);
       if(ps.length>=2){ps.forEach(function(cv,ix){var o=newInvoice([cv]);o.splitNote='Receipt '+(ix+1)+' of '+ps.length+' in this photo';});toast(ps.length+' receipts found in one photo. Each one is its own invoice.');}
