@@ -171,7 +171,7 @@ pre{white-space:pre-wrap;font-size:12px;color:var(--ink2);background:var(--bg);b
 (function(){
 'use strict';
 var API='https://ovhijhkosaljyqapehoz.supabase.co/functions/v1/invoice-intake';
-var CATS=['Fuel','Maintenance','Repair','Tires','Parts','Cleaning / Detail','Registration / Title','Tolls / Citations','Other'];
+var CATS=['Fuel','Oil Change','Maintenance','Repair','Tires','Parts','Cleaning / Detail','Registration / Title','Tolls / Citations','Other'];
 var CARS=[],SESSION='',seq=0,INV={};
 var $=function(id){return document.getElementById(id);};
 function store(k,v){try{if(v==null)localStorage.removeItem(k);else localStorage.setItem(k,v);}catch(e){}}
@@ -507,8 +507,10 @@ var CAT_WORDS={
   'Parts':/\b(autozone|o.?reilly|advance auto|napa|rockauto|part (no|number|#)|parts?|parts? only|core charge|restocking|will\s*call|list\s*price|counter\s*sale)\b/gi,
   'Repair':/\b(locksmith|lockout|keys?|key\s*fob|fob|remote|transponder|ignition|rekey|repair\w*|labor|labour|brake pads?|rotors?|collision|body (shop|labor)|bumper|fender|diagnos\w*|alternator|battery|starter|suspension|strut|axle|refinish|paint|frame|radiator|headlamp|windshield|rack\s*(and|&)?\s*pinion|pinion|cv\s*axle|control\s*arm|tie\s*rod|wheel\s*bearing|water\s*pump|timing\s*belt|spark\s*plugs?)\b/gi
 };
+var OIL_CHANGE=/oil\s*change|\bL\.?O\.?F\b|lube\s*,?\s*oil\s*(?:&|and)?\s*filter|oil\s*(?:&|and)\s*filter\s*(?:change|service)|synthetic\s*oil\s*(?:change|service)|full\s*synthetic\s*service/i;
 function guessCategory(t){
   if(FUEL_BRANDS.test(t)&&/gal|unleaded|unl\b|diesel|pump|fuel|regular|premium/i.test(t))return 'Fuel';
+  if(OIL_CHANGE.test(t))return 'Oil Change';   /* oil changes are tracked on their own, with the miles */
   var best='Other',n=0;
   Object.keys(CAT_WORDS).forEach(function(c){var m=t.match(CAT_WORDS[c]);var k=m?m.length:0;if(k>n){n=k;best=c;}});
   return best;
@@ -663,7 +665,8 @@ function fixFuel(lines){
 function stallionWhole(line){var re=/\$\s*(\d{1,4}(?:\.\d{2})?)/g,m,last=null;while((m=re.exec(line)))last=parseFloat(m[1]);return last;}
 var STALLION_ITEM_CAT=[
   [/rack\s*(and|&)?\s*pinion|pinion|cv\s*axle|control\s*arm|tie\s*rod|wheel\s*bearing|brake|rotor|pad|alternator|starter|suspension|strut|\baxle\b|radiator|water\s*pump|timing|belt|ignition|engine|transmission|a\/?c\b|compressor|repair/i,'Repair'],
-  [/oil\s*change|oil\b|lube|filter|tune.?up|coolant|flush|fluid/i,'Repair'],
+  [/oil\s*change/i,'Oil Change'],
+  [/oil\b|lube|filter|tune.?up|coolant|flush|fluid/i,'Repair'],
   [/\btires?\b|wheel|align|balance|rotation/i,'Tires'],
   [/wash|detail|clean|vacuum/i,'Cleaning / Detail']
 ];
@@ -703,7 +706,7 @@ function stallionFix(lines,flat,res){
   if(items.length)res.items=items;
   if(total!=null)res.total=total;
   /* category — the commonest item category, defaulting to Repair for this repair shop */
-  if(items.length){var cnt={};items.forEach(function(it){cnt[it.cat]=(cnt[it.cat]||0)+1;});var b=Object.keys(cnt).sort(function(x,y){return cnt[y]-cnt[x];})[0];res.category=(b&&b!=='Other')?b:'Repair';}
+  if(items.length){var cnt={};items.forEach(function(it){cnt[it.cat]=(cnt[it.cat]||0)+1;});var b=Object.keys(cnt).sort(function(x,y){return cnt[y]-cnt[x];})[0];res.category=(b&&b!=='Other')?b:'Repair';if(items.every(function(it){return it.cat==='Oil Change';}))res.category='Oil Change';}
   else res.category='Repair';
   /* note */
   var ds=items.map(function(it){return it.desc;}).filter(Boolean);
@@ -773,6 +776,9 @@ function parse(text){
   res.fuelOk=res.category==='Fuel'?fuelSt==='ok':null;   /* false: gallons x price didn't come out to the total */
   res.wash=findWashMembership(text,res);
   if(/stall[i1]on\s*aut/i.test(flat))stallionFix(lines,flat,res);   /* Stallion Automotive repair invoices */
+  /* the shop's next-due mileage: "NEXT OIL CHANGE: 15118", even smudged ("NEXT O| GE: 15118"); must be past the odometer */
+  var nx=flat.match(/\bnext\b[^\d\n]{0,22}?([\d,]{4,7})\b/i),nv=nx?+nx[1].replace(/,/g,''):0,ov=+String(res.odometer||'').replace(/,/g,'')||0;
+  res.next_oil=nv&&(!ov||nv>ov)?String(nv):'';
   return res;
 }
 
@@ -813,6 +819,7 @@ function newInvoice(files,opts){
       '<label>Vendor</label><input data-f="vendor" placeholder="Shop or store name">'+
       '<div class="row2"><div><label>Category</label><select data-f="category">'+CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div><div><label>Invoice #</label><input data-f="invoice_no"></div></div>'+
       '<div class="row3"><div><label>Subtotal</label><input data-f="subtotal" inputmode="decimal"></div><div><label>Tax</label><input data-f="tax" inputmode="decimal"></div><div><label>Odometer</label><input data-f="odometer" inputmode="numeric"></div></div>'+
+      '<div class="row2 hidden" data-oil><div><label>Next oil change (miles)</label><input data-f="next_oil_change_mi" inputmode="numeric" placeholder="From the sticker or receipt"></div><div class="hint" style="align-self:end;margin:0 0 10px;font-size:12.5px;color:var(--ink2)">Oil changes need the odometer miles from the receipt.</div></div>'+
       '<div class="wash hidden" data-wash><label class="chk"><input type="checkbox" data-washon> Car wash membership for this car</label>'+
         '<div data-washbody><p class="hint">Take a photo of the membership sticker on the windshield so we know which car has which sticker. You need it to manage or cancel the membership.</p>'+
         '<div class="wrow"><label class="btn ghost" style="margin:0">📷 Sticker photo<input type="file" accept="image/*" capture="environment" data-sticker class="hidden"></label><img data-stickerimg class="hidden" alt="Sticker photo"></div>'+
@@ -825,10 +832,19 @@ function newInvoice(files,opts){
     '</div>';
   o.done=addPages(o,files);return o;
 }
+/* several fleet cars fit the year and model: the miles on the receipt tell them apart when only one car's
+   known mileage fits — its last recorded receipt miles (a bit lower), or its GPS odometer (within 2%) */
+function byMiles(r){var mi=parseInt(String(r.odometer||'').replace(/,/g,''),10);if(!(mi>0))return null;
+  var fit=carMatches(r.modelHint.q).map(function(c){
+    if(c.odo&&mi>=c.odo&&mi-c.odo<=20000)return {car:c,why:'last receipt '+Number(c.odo).toLocaleString()+' mi'};
+    if(c.gps&&Math.abs(c.gps-mi)<=Math.max(300,mi*0.02))return {car:c,why:'GPS '+Number(c.gps).toLocaleString()+' mi'};
+    return null;}).filter(Boolean);
+  return fit.length===1?fit[0]:null;}
+function oilBox(o){var el=document.getElementById(o.id);el.querySelector('[data-oil]').classList.toggle('hidden',el.querySelector('[data-f=category]').value!=='Oil Change');}
 function setStatus(o,txt,cls){var s=document.querySelector('#'+o.id+' [data-st]');s.textContent=txt;s.className='status'+(cls?' '+cls:'');}
 function carFor(plate){plate=String(plate||'').toUpperCase().replace(/[^A-Z0-9]/g,'');return CARS.filter(function(c){return c.plate===plate;})[0]||null;}
 function showCar(o){var el=document.getElementById(o.id),p=el.querySelector('[data-f=plate]').value,c=carFor(p),n=el.querySelector('[data-carname]');
-  n.textContent=c?(o.carHow&&p===o.autoPlate?(o.carHow==='photo'?'Found by the licence plate in the photo':'Found by '+o.carHow+' on the invoice'):o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice says '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
+  n.textContent=c?(o.carHow&&p===o.autoPlate?(o.carHow==='photo'?'Found by the licence plate in the photo':/^mileage/.test(o.carHow)?'Found by the miles on the receipt, '+o.carHow.replace(/^mileage \((.*)\)$/,'$1')+'. Check it is the right car.':'Found by '+o.carHow+' on the invoice'):o.lastUsed===p?'The last car you used. Change it if this invoice is for another car.':''):(o.makeHint&&el.querySelector('[data-carq]').value===o.makeHint?'The invoice says '+o.makeHint+'. Tap the right car.':el.querySelector('[data-carq]').value?'Pick a car from the list':'');n.style.color=c?'':'var(--bad)';updateSaveAll();}
 function addPages(o,files){
   var el=document.getElementById(o.id);o.state='reading';setStatus(o,'Reading…');el.querySelector('.bar').classList.remove('hidden');
   var list=[].slice.call(files);
@@ -844,6 +860,7 @@ function fill(o){
   el.querySelector('.bar').classList.add('hidden');el.querySelector('[data-form]').classList.remove('hidden');
   var keep=function(k,v){if(v!=null&&v!==''&&(!f(k).value||o.imgs.length===1||k!=='plate'))f(k).value=v;};
   if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;pickCar(o,r.car);}
+  else if(!f('plate').value&&r.modelHint&&byMiles(r)){var bm=byMiles(r);o.carHow='mileage ('+bm.why+')';o.autoPlate=bm.car.plate;pickCar(o,bm.car);}
   else if(!f('plate').value&&r.modelHint){
     /* "2025 Nissan Kicks" and the fleet has two of them: list just those and let the person tap the right one */
     o.makeHint=r.modelHint.q;var q0=el.querySelector('[data-carq]');q0.value=r.modelHint.q;carList(o,r.modelHint.q);}
@@ -852,10 +869,11 @@ function fill(o){
       /* the invoice names a make: start the car search there and let the person tap the right one */
       o.makeHint=r.makeHint;var q=el.querySelector('[data-carq]');q.value=r.makeHint;carList(o,r.makeHint);}
     else if(lp){o.carHow='';o.lastUsed=lp.plate;pickCar(o,lp);}}
-  keep('date',r.date);keep('vendor',r.vendor);keep('invoice_no',r.invoice_no);keep('odometer',r.odometer);
+  keep('date',r.date);keep('vendor',r.vendor);keep('invoice_no',r.invoice_no);keep('odometer',r.odometer);keep('next_oil_change_mi',r.next_oil);
   if(r.summary&&(!f('note').value||(!o.noteEdited&&f('note').value===o.noteAuto))){f('note').value=r.summary;o.noteAuto=r.summary;}
   if(r.total!=null)f('total').value=r.total.toFixed(2);if(r.subtotal!=null)f('subtotal').value=r.subtotal.toFixed(2);if(r.tax!=null)f('tax').value=r.tax.toFixed(2);
   if(o.imgs.length===1||f('category').value==='Other')f('category').value=r.category;
+  oilBox(o);
   o.items=r.items;
   if(r.wash&&!o.washSeen){o.washSeen=true;var wb=el.querySelector('[data-wash]');wb.classList.remove('hidden');el.querySelector('[data-washon]').checked=true;
     var wv=function(k,v){var i=el.querySelector('[data-w='+k+']');if(v&&!i.value)i.value=v;};
@@ -865,7 +883,7 @@ function fill(o){
   el.querySelector('[data-itemswrap]').open=false;
   el.querySelector('[data-text]').textContent=o.text||'(no text found)';
   el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
-  var miss=[];if(r.total==null)miss.push('total');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
+  var miss=[];if(r.total==null)miss.push('total');if(f('category').value==='Oil Change'&&!f('odometer').value)miss.push('miles (odometer)');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
   if(o.washSeen&&!o.sticker)miss.push('sticker photo');
   o.state='ready';setStatus(o,(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
   showCar(o);
@@ -873,13 +891,14 @@ function fill(o){
 function collect(o){
   var el=document.getElementById(o.id),v=function(k){return el.querySelector('[data-f='+k+']').value.trim();};
   var items=(o.items||[]).map(function(it,i){var d=el.querySelector('[data-idesc="'+i+'"]'),a=el.querySelector('[data-iamt="'+i+'"]');return {desc:d?d.value:it.desc,amount:a?parseFloat(a.value)||0:it.amount};});
-  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),note:v('note'),line_items:items,ocr_text:o.text};
+  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),next_oil_change_mi:v('next_oil_change_mi'),note:v('note'),line_items:items,ocr_text:o.text};
 }
 function save(o){
   if(o.state!=='ready')return Promise.resolve();
   var b=collect(o),el=document.getElementById(o.id);
   if(!carFor(b.plate)){setStatus(o,'Pick the car (plate, or year / make / model / color)','err');el.querySelector('[data-carq]').focus();return Promise.resolve();}
   if(!(parseFloat(String(b.total).replace(/[$,]/g,''))>=0)){setStatus(o,'Enter the total','err');el.querySelector('[data-f=total]').focus();return Promise.resolve();}
+  if(b.category==='Oil Change'&&!(parseInt(String(b.odometer).replace(/[,\s]/g,''),10)>0)){setStatus(o,'Enter the miles (odometer) from the oil change receipt','err');el.querySelector('[data-f=odometer]').focus();return Promise.resolve();}
   var won=el.querySelector('[data-washon]'),wbox=el.querySelector('[data-wash]');
   if(won&&won.checked&&!wbox.classList.contains('hidden')){
     var wget=function(k){return el.querySelector('[data-w='+k+']').value.trim();};
@@ -987,6 +1006,7 @@ $('libIn').onchange=function(){onFiles(this,true);};
 $('invoices').addEventListener('change',function(e){
   var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
   if(t.hasAttribute('data-addpage')){var fs=[].slice.call(t.files||[]);t.value='';if(fs.length)addPages(o,fs);}
+  if(t.matches('[data-f=category]'))oilBox(o);
   if(t.hasAttribute('data-washon'))card.querySelector('[data-washbody]').classList.toggle('hidden',!t.checked);
   if(t.hasAttribute('data-sticker')){var sf=t.files&&t.files[0];t.value='';if(!sf)return;
     fileToImg(sf).then(function(img){
