@@ -431,7 +431,8 @@ function findDate(lines){
     var l=fixDigits(l0),m,cands=[];
     var re1=/(?:^|[^\d])(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?!\d)/g,re2=/(?:^|[^\d])(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?!\d)/g,
         re3=/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*(\d{1,2})(?!\d)(?:st|nd|rd|th)?,?\s*'?(\d{2,4})\b/gi,
-        re4=/\b(\d{1,2})[\s\-]?(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*[\s\-,]*'?(\d{2,4})\b/gi;
+        re4=/\b(\d{1,2})[\s\-]?(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*[\s\-,]*'?(\d{2,4})\b/gi,
+        re5=/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\s+\d{1,2}:\d{2}(?::\d{2})?\s+(\d{4})\b/gi;   /* AutoZone: "Mon Nov 2 14:51:30 2026" */
     while((m=re1.exec(l))){var d0=iso(+m[3],+m[1],+m[2]);
       if(!d0&&m[3].length===4){var bestv=null;digitVariants(m[1]+'|'+m[2]+'|'+m[3],3).forEach(function(v){var q=v.s.split('|'),d=iso(+q[2],+q[0],+q[1]);if(d&&(!bestv||v.c<bestv.c))bestv={d:d,c:v.c};});if(bestv)d0=bestv.d;}
       /* a digit of the month lost at the paper's edge ("1/20/2026" for 10/20/2026): an old date becomes a recent one */
@@ -441,6 +442,7 @@ function findDate(lines){
     while((m=re2.exec(l)))cands.push(iso(+m[1],+m[2],+m[3]));
     while((m=re3.exec(l)))cands.push(iso(+m[3],MONTHS[m[1].toLowerCase()],+m[2]));
     while((m=re4.exec(l)))cands.push(iso(+m[3],MONTHS[m[2].toLowerCase()],+m[1]));
+    while((m=re5.exec(l)))cands.push(iso(+m[3],MONTHS[m[1].toLowerCase()],+m[2]));
     cands.filter(Boolean).forEach(function(d){var score=(/date|invoice|issued|order|service|trans|sale|time/i.test(l)?10:0)+(/\d{1,2}:\d{2}/.test(l)?4:0)-i*.05-(/due|exp|valid|warranty/i.test(l)?6:0);if(!best||score>best.s)best={d:d,s:score};});
   });
   return best&&best.d;
@@ -480,7 +482,8 @@ function findTotal(lines){
   var top=Object.keys(votes).sort(function(a,b){return votes[b]-votes[a];})[0];
   var tot=(top&&votes[top]>=2&&votes[top]>(votes[first.toFixed(2)]||0))?parseFloat(top):first;
   var st=lastAmount(lines,/sub\s*-?\s*total/i),tx=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax|taxable/i);
-  if(st!=null){var sum=Math.round((st+(tx||0))*100)/100;if(Math.abs(sum-tot)>0.004&&(Math.abs(sum-tot)<1||tot<st))tot=sum;}   /* a total below the subtotal is a misread */
+  /* without a tax line read, a total a little above the subtotal is just the tax added, not a misread */
+  if(st!=null){var sum=Math.round((st+(tx||0))*100)/100;if(Math.abs(sum-tot)>0.004&&((tx!=null&&Math.abs(sum-tot)<1)||tot<st))tot=sum;}   /* a total below the subtotal is a misread */
   return tot;
 }
 /* dealer / shop invoices end with a summary box (PARTS, LABOR, SUBLET, FREIGHT, MISC, SALES TAX ... TOTAL). When the
@@ -714,7 +717,9 @@ function stallionFix(lines,flat,res){
   return res;
 }
 function parse(text){
-  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean);var fuelSt=fixFuel(lines);var flat=lines.join('\n');text=flat;
+  var lines=text.split(/\n/).map(function(l){return l.replace(/[|_]{2,}/g,' ').trim();}).filter(Boolean)
+    /* the tax rate on a tax line ("STATE TAX @ 8.250 $0.41", "TAX 8.25% 0.41") is not money: drop it so the tax amount counts */
+    .map(function(l){return /\btax\b/i.test(l)?l.replace(/@\s*\d{1,2}[.,]\d{1,3}\s*%?|\b\d{1,2}[.,]\d{1,3}\s*%/g,' '):l;});var fuelSt=fixFuel(lines);var flat=lines.join('\n');text=flat;
   var total=findTotal(lines);if(total==null)total=summaryTotal(lines);
   var subtotal=lastAmount(lines,/sub\s*-?\s*total/i);
   var tax=lastAmount(lines,/\b(sales\s*)?tax\b/i,/tax\s*id|tax\s*exempt|before\s*tax|pre.?tax/i);
