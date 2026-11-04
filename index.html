@@ -808,6 +808,57 @@ function carList(o,q){var el=document.getElementById(o.id),box=el.querySelector(
 function pickCar(o,c){var el=document.getElementById(o.id);el.querySelector('[data-f=plate]').value=c?c.plate:'';
   el.querySelector('[data-carq]').value=c?carLabel(c):'';el.querySelector('[data-carlist]').hidden=true;if(c)store('er_inv_lastplate',c.plate);showCar(o);}
 
+/* ---------- one bill, several cars (e.g. oil changes on three cars, one receipt) ---------- */
+/* the car a line names: a fleet plate or VIN ("P:plate"), else a fleet model with its year if printed ("M:2025 kicks") */
+function carOnLine(l){var up=l.toUpperCase(),hit=null;
+  CARS.some(function(c){var p=c.plate,re=new RegExp('\\b'+p.slice(0,3)+'[\\s\\-]?'+p.slice(3)+'\\b');
+    if(re.test(up)||(c.vin&&c.vin.length===17&&up.indexOf(c.vin)>=0)){hit='P:'+c.plate;return true;}return false;});
+  if(hit)return hit;
+  CARS.some(function(c){var model=String(c.name).replace(/^\d{4}\s+/,'').split(' ')[1]||'';if(model.length<3||!/[a-z]/i.test(model))return false;
+    if(new RegExp('\\b'+model.replace(/[^A-Za-z0-9]/g,'.?')+'\\b','i').test(l)){var y=(l.match(/\b(?:19|20)\d{2}\b/)||[''])[0];hit='M:'+(y?y+' ':'')+model.toLowerCase();return true;}return false;});
+  return hit;}
+var FOOT=/^\W*(sub\s*-?\s*total|total|tax|sales\s*tax|balance|amount\s*due|grand\s*total)\b/i;
+function lineMoney(l){var a=amountsIn(l);if(a.length)return a[a.length-1];var m=l.match(/\$\s?(\d{1,5})(?![\d.,])/);return m?+m[1]:null;}
+function blockMiles(t){var m=t.match(/\b(?:miles?|mileage|odometer|odo)\b\s*(?:in|out)?\s*[:#\-]?\s*([\d,]{3,7})\b/i)||t.match(/\b(\d{1,3}(?:,\d{3})+|\d{4,6})\s*(?:mi|miles)\b/i);return m?m[1].replace(/,/g,''):'';}
+function blockNext(t,mi){var m=t.match(/\bnext\b[^\d\n]{0,22}?([\d,]{4,7})\b/i),v=m?+m[1].replace(/,/g,''):0;return v&&(!mi||v>+mi)?String(v):'';}
+/* null unless the bill names two or more different cars, each with its own amount */
+function splitByCar(text){
+  var lines=String(text).split(/\n/).map(function(l){return l.trim();}).filter(Boolean);
+  var marks=[];lines.forEach(function(l,i){var k=carOnLine(l);if(k)marks.push({i:i,k:k});});
+  if(marks.length<2)return null;
+  var isP=function(k){return k.charAt(0)==='P';},MONEY=function(l){return lineMoney(l)!=null;};
+  /* a car named again within 3 lines, with no money in between, is the same car (MAKE/MODEL line, then PLATE line) */
+  var blocks=[];marks.forEach(function(m){var b=blocks[blocks.length-1];
+    var same=b&&m.i-b.last<=3&&!lines.slice(b.last+1,m.i).some(MONEY)&&!(isP(m.k)&&b.keys.some(isP)&&b.keys.indexOf(m.k)<0);
+    if(same){b.last=m.i;b.keys.push(m.k);}else blocks.push({start:m.i,last:m.i,keys:[m.k]});});
+  var id=function(b){return b.keys.filter(isP)[0]||b.keys[0];};
+  /* the same car named twice (top and bottom of one bill) is not a second car */
+  var seen={};blocks=blocks.filter(function(b){var k=id(b);if(seen[k])return false;seen[k]=1;return true;});
+  if(blocks.length<2)return null;
+  var foot=lines.length;for(var j=blocks[blocks.length-1].last+1;j<lines.length;j++)if(FOOT.test(lines[j])){foot=j;break;}
+  var header=lines.slice(0,blocks[0].start);
+  var out=blocks.map(function(b,ix){var end=ix+1<blocks.length?blocks[ix+1].start:foot,bl=lines.slice(b.start,end);
+    var amt=0,any=false;bl.forEach(function(l){if(FOOT.test(l)||(NOT_MONEY.test(l)&&!/\$/.test(l)))return;var v=lineMoney(l);if(v!=null){amt+=v;any=true;}});
+    var t=bl.join('\n'),mi=blockMiles(t);
+    return {text:header.concat(bl).join('\n'),amount:any?Math.round(amt*100)/100:null,miles:mi,next:blockNext(t,mi),key:id(b)};});
+  if(out.filter(function(b){return b.amount>0;}).length<2)return null;
+  var grand=parse(text).total,sum=0;out.forEach(function(b){sum+=b.amount||0;});sum=Math.round(sum*100)/100;
+  /* tax on the bill total: share it by amount so the cars add up to what was paid */
+  var taxShared=false;
+  if(grand!=null&&grand>sum+0.005&&grand-sum<=sum*0.15&&out.every(function(b){return b.amount>0;})){
+    var left=grand;out.forEach(function(b,ix){if(ix===out.length-1)b.amount=Math.round(left*100)/100;else{b.amount=Math.round(b.amount*grand/sum*100)/100;left-=b.amount;}});taxShared=true;sum=grand;}
+  return {blocks:out,grand:grand,sum:sum,taxShared:taxShared};}
+function newGroup(){return 'g'+Date.now().toString(36)+Math.random().toString(36).slice(2,6);}
+/* another card for the same bill, sharing its photo (no second read) */
+function copyInvoice(o,opts,after){var k=newInvoice([],Object.assign({text:o.text,imgs:[],fromPdf:o.fromPdf,page:o.page,pages:o.pages},opts));
+  var ke=document.getElementById(k.id);o.imgs.forEach(function(img){k.imgs.push(img);var t=document.createElement('img');t.src=img.src||(img.toDataURL?img.toDataURL('image/jpeg',.7):'');t.alt='Page '+k.imgs.length;ke.querySelector('.thumbs').appendChild(t);});
+  (after||document.getElementById(o.id)).after(ke);return k;}
+function maybeSplit(o){var sp=splitByCar(o.text);if(!sp)return;
+  var g=newGroup(),n=sp.blocks.length,mk=function(b,ix){return {ptext:b.text,forceTotal:b.amount,forceOdo:b.miles,forceNext:b.next,split:{i:ix+1,n:n,grand:sp.grand,sum:sp.sum,tax:sp.taxShared},splitGroup:g};};
+  Object.assign(o,mk(sp.blocks[0],0));fill(o);
+  var last=document.getElementById(o.id);o.kids=sp.blocks.slice(1).map(function(b,ix){var k=copyInvoice(o,mk(b,ix+1),last);last=document.getElementById(k.id);return k;});
+  toast('This bill covers '+n+' cars. Each one is its own invoice.');updateSaveAll();}
+
 /* ---------- invoice cards ---------- */
 function newInvoice(files,opts){
   var id='i'+(++seq),o=INV[id]={id:id,files:[],imgs:[],text:'',state:'reading'};if(opts)for(var k in opts)o[k]=opts[k];
@@ -828,7 +879,7 @@ function newInvoice(files,opts){
       '<label>Notes</label><textarea data-f="note" placeholder="Optional"></textarea>'+
       '<details data-itemswrap><summary>Line items</summary><table class="items" data-items></table></details>'+
       '<details><summary>Text read from the photo</summary><pre data-text></pre></details>'+
-      '<div class="actions"><label class="btn ghost" style="margin:0">+ page<input type="file" accept="image/*" data-addpage class="hidden"></label><button class="btn primary" data-save>Save</button></div>'+
+      '<div class="actions"><label class="btn ghost" style="margin:0">+ page<input type="file" accept="image/*" data-addpage class="hidden"></label><button class="btn ghost" data-another title="This bill also covers another car">+ car</button><button class="btn primary" data-save>Save</button></div>'+
     '</div>';
   o.done=addPages(o,files);return o;
 }
@@ -852,11 +903,11 @@ function addPages(o,files){
       o.imgs.push(img);var t=document.createElement('img');t.src=img.src||(img.toDataURL?img.toDataURL('image/jpeg',.7):'');t.alt='Page '+o.imgs.length;el.querySelector('.thumbs').appendChild(t);
       var bar=function(pr){el.querySelector('.bar i').style.width=Math.round(pr*100)+'%';};
       return readImage(img,function(m){setStatus(o,m);},bar).then(function(t){o.text+=(o.text?'\n':'')+t;});});});},Promise.resolve())
-  .then(function(){fill(o);})
+  .then(function(){fill(o);if(!o.split&&list.length&&o.imgs.length===list.length)maybeSplit(o);})
   .catch(function(e){setStatus(o,e.message||'Could not read the photo','err');fill(o);});
 }
 function fill(o){
-  var el=document.getElementById(o.id),r=parse(o.text),f=function(k){return el.querySelector('[data-f='+k+']');};
+  var el=document.getElementById(o.id),r=parse(o.ptext||o.text),f=function(k){return el.querySelector('[data-f='+k+']');};
   el.querySelector('.bar').classList.add('hidden');el.querySelector('[data-form]').classList.remove('hidden');
   var keep=function(k,v){if(v!=null&&v!==''&&(!f(k).value||o.imgs.length===1||k!=='plate'))f(k).value=v;};
   if(r.car){o.carHow=r.carHow;o.autoPlate=r.car.plate;pickCar(o,r.car);}
@@ -873,6 +924,13 @@ function fill(o){
   if(r.summary&&(!f('note').value||(!o.noteEdited&&f('note').value===o.noteAuto))){f('note').value=r.summary;o.noteAuto=r.summary;}
   if(r.total!=null)f('total').value=r.total.toFixed(2);if(r.subtotal!=null)f('subtotal').value=r.subtotal.toFixed(2);if(r.tax!=null)f('tax').value=r.tax.toFixed(2);
   if(o.imgs.length===1||f('category').value==='Other')f('category').value=r.category;
+  if(o.split&&!o.split.manual){   /* this car's share of a bill that covers several cars */
+    f('total').value=o.forceTotal!=null?o.forceTotal.toFixed(2):'';f('subtotal').value='';f('tax').value='';
+    if(o.forceOdo)f('odometer').value=o.forceOdo;if(o.forceNext)f('next_oil_change_mi').value=o.forceNext;
+    var sn=(r.summary||'')+' · car '+o.split.i+' of '+o.split.n+' on this bill'+(o.split.grand!=null?' ('+money(o.split.grand)+' in all'+(o.split.tax?', tax shared by amount':'')+')':'');
+    if(!o.noteEdited){f('note').value=sn;o.noteAuto=sn;}}
+  if(o.blank){o.blank=false;['plate','total','subtotal','tax','odometer','next_oil_change_mi'].forEach(function(k){f(k).value='';});el.querySelector('[data-carq]').value='';o.carHow='';o.autoPlate='';
+    if(!o.noteEdited){f('note').value=(r.summary||'')+' · another car on the same bill';o.noteAuto=f('note').value;}}
   oilBox(o);
   o.items=r.items;
   if(r.wash&&!o.washSeen){o.washSeen=true;var wb=el.querySelector('[data-wash]');wb.classList.remove('hidden');el.querySelector('[data-washon]').checked=true;
@@ -882,16 +940,18 @@ function fill(o){
   el.querySelector('[data-items]').innerHTML=r.items.length?r.items.map(function(it,i){return '<tr><td><input data-idesc="'+i+'" value="'+esc(it.desc)+'"></td><td class="r" style="width:96px"><input data-iamt="'+i+'" inputmode="decimal" value="'+(it.amount!=null?it.amount.toFixed(2):'')+'"></td></tr>';}).join(''):'<tr><td class="muted">No line items found.</td></tr>';
   el.querySelector('[data-itemswrap]').open=false;
   el.querySelector('[data-text]').textContent=o.text||'(no text found)';
-  el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(r.total!=null?' · '+money(r.total):'');
-  var miss=[];if(r.total==null)miss.push('total');if(f('category').value==='Oil Change'&&!f('odometer').value)miss.push('miles (odometer)');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
+  var tv=parseFloat(f('total').value);
+  el.querySelector('.inv-h .t').textContent=(r.vendor||'Invoice')+(!isNaN(tv)?' · '+money(tv):'')+(o.split&&!o.split.manual?' · car '+o.split.i+' of '+o.split.n:'');
+  var miss=[];if(!f('total').value)miss.push('total');if(f('category').value==='Oil Change'&&!f('odometer').value)miss.push('miles (odometer)');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
   if(o.washSeen&&!o.sticker)miss.push('sticker photo');
-  o.state='ready';setStatus(o,(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
+  var sp=o.split&&!o.split.manual?'Car '+o.split.i+' of '+o.split.n+' on this bill'+(o.split.grand!=null?(Math.abs(o.split.sum-o.split.grand)<0.01?': the cars add up to the bill total '+money(o.split.grand)+' ✓. ':': the cars add up to '+money(o.split.sum)+' but the bill says '+money(o.split.grand)+'. Check the amounts. '):'. '):o.split&&o.split.manual?'Another car on the same bill: pick the car and enter its amount. ':'';
+  o.state='ready';setStatus(o,sp+(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
   showCar(o);
 }
 function collect(o){
   var el=document.getElementById(o.id),v=function(k){return el.querySelector('[data-f='+k+']').value.trim();};
   var items=(o.items||[]).map(function(it,i){var d=el.querySelector('[data-idesc="'+i+'"]'),a=el.querySelector('[data-iamt="'+i+'"]');return {desc:d?d.value:it.desc,amount:a?parseFloat(a.value)||0:it.amount};});
-  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),next_oil_change_mi:v('next_oil_change_mi'),note:v('note'),line_items:items,ocr_text:o.text};
+  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),next_oil_change_mi:v('next_oil_change_mi'),note:v('note'),split_group:o.splitGroup||'',line_items:items,ocr_text:o.text};
 }
 function save(o){
   if(o.state!=='ready')return Promise.resolve();
@@ -958,11 +1018,11 @@ function onPdf(file){
     var os=pages.map(function(cv,ix){return newInvoice([cv],{fromPdf:name,page:ix+1,pages:pages.length});});updateSaveAll();
     /* newest card goes on top; put page 1 first */
     os.slice().reverse().forEach(function(o){$('invoices').prepend(document.getElementById(o.id));});
-    return Promise.all(os.map(function(o){return o.done;})).then(function(){tidyPdf(os,note,name);});
+    return Promise.all(os.map(function(o){return o.done;})).then(function(){os=[].concat.apply([],os.map(function(o){return [o].concat(o.kids||[]);}));tidyPdf(os,note,name);});
   }).catch(function(e){note.querySelector('[data-pn]').textContent=e.message||'Could not open that PDF';note.classList.add('bad');});
 }
 function tidyPdf(os,note,name){
-  var R={};os.forEach(function(o){R[o.id]=parse(o.text);});
+  var R={};os.forEach(function(o){R[o.id]=parse(o.ptext||o.text);});
   var tot=function(o){var v=parseFloat(document.querySelector('#'+o.id+' [data-f=total]').value);return isNaN(v)?null:v;};
   var plate=function(o){return document.querySelector('#'+o.id+' [data-f=plate]').value;};
   var live=os.slice(),said=[];
@@ -1031,6 +1091,8 @@ $('invoices').addEventListener('click',function(e){
   var t=e.target,card=t.closest('.card'),o=card&&INV[card.id];if(!o)return;
   var pk=t.closest('[data-pick]');if(pk){e.preventDefault();pickCar(o,carFor(pk.getAttribute('data-pick')));return;}
   if(t.closest('[data-save]')){e.preventDefault();save(o);}
+  else if(t.closest('[data-another]')){e.preventDefault();o.splitGroup=o.splitGroup||newGroup();
+    var k=copyInvoice(o,{ptext:o.ptext||o.text,blank:true,split:{manual:true},splitGroup:o.splitGroup});document.getElementById(k.id).scrollIntoView({block:'center'});}
   else if(t.closest('[data-del]')){if(o.state==='saved'||confirm('Remove this invoice? It has not been saved.')){card.remove();delete INV[o.id];updateSaveAll();}}
   else if(t.tagName==='IMG'&&(t.closest('.thumbs')||t.hasAttribute('data-stickerimg'))){var lb=$('lb');lb.querySelector('img').src=t.src;lb.style.display='flex';}
 });
