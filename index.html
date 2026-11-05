@@ -946,7 +946,7 @@ function newInvoice(files,opts){
       '<label>Vendor</label><input data-f="vendor" placeholder="Shop or store name">'+
       '<div class="row2"><div><label>Category</label><select data-f="category">'+CATS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div><div><label>Invoice #</label><input data-f="invoice_no"></div></div>'+
       '<div class="row3"><div><label>Subtotal</label><input data-f="subtotal" inputmode="decimal"></div><div><label>Tax</label><input data-f="tax" inputmode="decimal"></div><div><label>Odometer</label><input data-f="odometer" inputmode="numeric"></div></div>'+
-      '<div class="row2 hidden" data-oil><div><label>Next oil change (miles)</label><input data-f="next_oil_change_mi" inputmode="numeric" placeholder="From the sticker or receipt"></div><div class="hint" style="align-self:end;margin:0 0 10px;font-size:12.5px;color:var(--ink2)">Oil changes need the odometer miles from the receipt.</div></div>'+
+      '<div class="row2 hidden" data-oil><div><label>Next oil change (miles)</label><input data-f="next_oil_change_mi" inputmode="numeric" placeholder="From the receipt, else miles + 5,000"></div><div class="hint" style="align-self:end;margin:0 0 10px;font-size:12.5px;color:var(--ink2)">Oil changes need the odometer miles from the receipt.</div></div>'+
       '<div class="wash hidden" data-wash><label class="chk"><input type="checkbox" data-washon> Car wash membership for this car</label>'+
         '<div data-washbody><p class="hint">Take a photo of the membership sticker on the windshield so we know which car has which sticker. You need it to manage or cancel the membership.</p>'+
         '<div class="wrow"><label class="btn ghost" style="margin:0">📷 Sticker photo<input type="file" accept="image/*" capture="environment" data-sticker class="hidden"></label><img data-stickerimg class="hidden" alt="Sticker photo"></div>'+
@@ -1024,10 +1024,14 @@ function fill(o){
   o.state='ready';setStatus(o,sp+(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
   showCar(o);
 }
+var OIL_EVERY=5000;
 function collect(o){
   var el=document.getElementById(o.id),v=function(k){return el.querySelector('[data-f='+k+']').value.trim();};
   var items=(o.items||[]).map(function(it,i){var d=el.querySelector('[data-idesc="'+i+'"]'),a=el.querySelector('[data-iamt="'+i+'"]');return {desc:d?d.value:it.desc,amount:a?parseFloat(a.value)||0:it.amount};});
-  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),next_oil_change_mi:v('next_oil_change_mi'),note:v('note'),split_group:o.splitGroup||'',line_items:items,ocr_text:o.text};
+  /* our oil changes are due again every 5,000 miles: when the receipt doesn't print the next one, use that */
+  var odoN=parseInt(v('odometer').replace(/[,\s]/g,''),10),nextOil=v('next_oil_change_mi');
+  if(v('category')==='Oil Change'&&!nextOil&&odoN>0){nextOil=String(odoN+OIL_EVERY);var nf=el.querySelector('[data-f=next_oil_change_mi]');if(nf)nf.value=nextOil;}
+  return {plate:v('plate'),date:v('date'),vendor:v('vendor'),invoice_no:v('invoice_no'),category:v('category'),total:v('total'),subtotal:v('subtotal'),tax:v('tax'),odometer:v('odometer'),next_oil_change_mi:nextOil,note:v('note'),split_group:o.splitGroup||'',line_items:items,ocr_text:o.text};
 }
 function save(o){
   if(o.state!=='ready')return Promise.resolve();
