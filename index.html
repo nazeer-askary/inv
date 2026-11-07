@@ -453,7 +453,7 @@ function ocr(canvas,onProgress,psm){
 
 /* ---------- reading the text ---------- */
 var MONTHS={jan:1,feb:2,mar:3,apr:4,may:5,jun:6,jul:7,aug:8,sep:9,sept:9,oct:10,nov:11,dec:12};
-function amountsIn(line){var out=[],re=/(?:\$\s?)?(-?\d{1,3}(?:[,\s]\d{3})*|\d+)[.,](\d{2})(?!\d)/g,m;while((m=re.exec(line))){out.push(parseFloat(m[1].replace(/[,\s]/g,'')+'.'+m[2]));}return out;}
+function amountsIn(line){var out=[],re=/(?:\$\s?)?(-?\d{1,3}(?:[,\s]\d{3})*|\d+)[.,](\d{2})(?!\d)/g,m;while((m=re.exec(line))){out.push(Math.abs(parseFloat(m[1].replace(/[,\s]/g,'')+'.'+m[2])));}return out;}
 function iso(y,m,d){if(y<100)y+=2000;if(m<1||m>12||d<1||d>31)return null;var dt=new Date(y,m-1,d);if(dt.getMonth()!==m-1)return null;
   var now=new Date(),ago=new Date(now.getFullYear()-3,0,1);if(dt>new Date(now.getTime()+3*864e5)||dt<ago)return null;
   return y+'-'+String(m).padStart(2,'0')+'-'+String(d).padStart(2,'0');}
@@ -788,9 +788,20 @@ function parse(text){
   /* no labelled total: on a short receipt the biggest amount is the total; on a long document it's a guess, so leave it for you */
   if(total==null&&subtotal!=null&&tax!=null)total=Math.round((subtotal+tax)*100)/100;
   if(total==null&&all.length&&lines.length<=40)total=Math.max.apply(null,all);
-  /* a card-machine RETURN slip (RETURN printed next to the MID / TID / REF# / APPR CODE lines): the money came back */
-  var refund=lines.some(function(l,li){return /\bRETURN\b/.test(l)&&l.replace(/RETURN/,'').replace(/[^A-Za-z]/g,'').length<=6&&
-    /\b(MID|TID|DID|REF#|RRN|APPR|BATCH)\b/.test(lines.slice(Math.max(0,li-4),li+5).join(' '));});
+  /* Refund / credit — the money came back, so the total is a minus. Detect any of: a card-machine RETURN slip;
+     a total printed negative ( (84.14) / -$84.14 / 84.14- / 84.14 CR ); or a credit-memo / return / refund header
+     (e.g. AutoZone "Commercial Return", "Return Invoice"). amountsIn() returns magnitudes, so findTotal gives the
+     positive figure and we flip the sign here. */
+  var refund=(function(){
+    if(lines.some(function(l,li){return /\bRETURN\b/.test(l)&&l.replace(/RETURN/,'').replace(/[^A-Za-z]/g,'').length<=6&&
+      /\b(MID|TID|DID|REF#|RRN|APPR|BATCH)\b/.test(lines.slice(Math.max(0,li-4),li+5).join(' '));}))return true;
+    if(lines.some(function(l){if(!TOTAL_LABELS.some(function(re){return re.test(l);})||NOT_TOTAL.test(l))return false;
+      return /\(\s*\$?\s*\d[\d,]*\.\d{2}\s*\)/.test(l)||/(^|[^\d.\/-])-\s*\$?\s*\d[\d,]*\.\d{2}\b/.test(l)
+        ||/\d[\d,]*\.\d{2}\s*-\s*$/.test(l)||/\d[\d,]*\.\d{2}\s*\bCR\b/i.test(l);}))return true;
+    if(lines.some(function(l){return /\b(credit\s*memo|commercial\s*return|return\s*invoice|return\s*receipt|refund\s*receipt|merchandise\s*credit|amount\s*refunded|total\s*refund(ed)?)\b/i.test(l);}))return true;
+    if(lines.some(function(l){return /\brefund(ed)?\b/i.test(l)&&amountsIn(l).length;}))return true;
+    return false;
+  })();
   if(refund&&total>0)total=-total;
   var inv=findInvoiceNo(lines);
   var odo=findOdometer(lines);
@@ -842,7 +853,7 @@ function parse(text){
   var makeHint='';
   if(!car){var makes={};CARS.forEach(function(c){var m=String(c.name).replace(/^\d{4}\s+/,'').split(' ')[0];if(m)makes[m.toLowerCase()]=m;});
     Object.keys(makes).some(function(m){if(new RegExp('\\b'+m.replace(/[-]/g,'.?')+'\\b','i').test(flat)){makeHint=makes[m];return true;}return false;});}
-  var res={makeHint:makeHint,modelHint:modelHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:(refund?'Return (refund). ':'')+summarize(lines,items,guessCategory(flat),findVendor(lines)),refund:refund,boxOk:boxOk};
+  var res={makeHint:makeHint,modelHint:modelHint,vendor:findVendor(lines),date:findDate(lines)||'',invoice_no:inv,total:total,subtotal:subtotal,tax:tax,odometer:odo,items:items.slice(0,40),category:guessCategory(flat),car:car,carHow:how,summary:(refund?'Refund / credit. ':'')+summarize(lines,items,guessCategory(flat),findVendor(lines)),refund:refund,boxOk:boxOk};
   if(/^(AutoZone|O'Reilly Auto Parts|Advance Auto Parts|NAPA)$/.test(res.vendor)&&res.category!=='Fuel')res.category='Parts';
   if(/car\s*wash/i.test(res.vendor||''))res.category='Cleaning / Detail';
   if(/^(LKQ|Shaver Auto Parts)$/.test(res.vendor))res.category='Parts';
@@ -1021,7 +1032,7 @@ function fill(o){
   var miss=[];if(!f('total').value)miss.push('total');if(f('category').value==='Oil Change'&&!f('odometer').value)miss.push('miles (odometer)');if(!r.date)miss.push('date');if(!r.car&&!f('plate').value)miss.push('car');
   if(o.washSeen&&!o.sticker)miss.push('sticker photo');
   var sp=o.split&&!o.split.manual?'Car '+o.split.i+' of '+o.split.n+' on this bill'+(o.split.grand!=null?(Math.abs(o.split.sum-o.split.grand)<0.01?': the cars add up to the bill total '+money(o.split.grand)+' ✓. ':': the cars add up to '+money(o.split.sum)+' but the bill says '+money(o.split.grand)+'. Check the amounts. '):'. '):o.split&&o.split.manual?'Another car on the same bill: pick the car and enter its amount. ':'';
-  o.state='ready';setStatus(o,sp+(r.refund?'A RETURN: the total is a refund (minus). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
+  o.state='ready';setStatus(o,sp+(r.refund?'Refund / credit — saved as a minus (money back). ':'')+(miss.length?'Check: '+miss.join(', ')+' not found':'Read — check and save'),miss.length||r.refund?'warn':'');
   showCar(o);
 }
 var OIL_EVERY=5000;
@@ -1037,7 +1048,7 @@ function save(o){
   if(o.state!=='ready')return Promise.resolve();
   var b=collect(o),el=document.getElementById(o.id);
   if(!carFor(b.plate)){setStatus(o,'Pick the car (plate, or year / make / model / color)','err');el.querySelector('[data-carq]').focus();return Promise.resolve();}
-  if(!(parseFloat(String(b.total).replace(/[$,]/g,''))>=0)){setStatus(o,'Enter the total','err');el.querySelector('[data-f=total]').focus();return Promise.resolve();}
+  var _tn=parseFloat(String(b.total).replace(/[$,]/g,''));if(String(b.total).trim()===''||!isFinite(_tn)){setStatus(o,'Enter the total','err');el.querySelector('[data-f=total]').focus();return Promise.resolve();}
   if(b.category==='Oil Change'&&!(parseInt(String(b.odometer).replace(/[,\s]/g,''),10)>0)){setStatus(o,'Enter the miles (odometer) from the oil change receipt','err');el.querySelector('[data-f=odometer]').focus();return Promise.resolve();}
   var won=el.querySelector('[data-washon]'),wbox=el.querySelector('[data-wash]');
   if(won&&won.checked&&!wbox.classList.contains('hidden')){
